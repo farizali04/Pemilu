@@ -16,8 +16,10 @@
     </a>
     <nav class="nav">
       <a href="/">📊 Dashboard</a>
-      <a href="/tambah-pemilih">➕ Tambah Pemilih</a>
+      <a href="/tambah-pemilih">➕ Tambah</a>
+      <a href="/import">📥 Import</a>
       <a href="/kader">🎖️ Kader</a>
+      <a href="/log-duplikat">🔍 Log</a>
     </nav>
   </div>
 </header>
@@ -41,32 +43,42 @@
 
       <input type="hidden" id="edit-id"/>
 
-      <div id="alert-dup" class="alert-dup">
-        <div class="alert-dup-title">⚠️ Perhatian: Data Mungkin Sudah Terdaftar!</div>
-        <div style="font-size:13px;color:var(--text2);margin-bottom:10px;">Ditemukan kesamaan dengan data lain:</div>
-        <div id="dup-list"></div>
-      </div>
       <div id="alert-success" class="alert-success"></div>
-      <div id="alert-error"   class="alert-error"></div>
+      <div id="alert-error" class="alert-error"></div>
 
       <div class="form-group">
         <label>Nama Lengkap <span style="color:var(--danger);">*</span></label>
-        <input type="text" id="inp-nama" placeholder="Nama lengkap…" oninput="onInputPemilih()" autocomplete="off"/>
+        <input type="text" id="inp-nama" placeholder="Nama lengkap…" autocomplete="off"/>
       </div>
 
       <div class="form-group">
         <label>NIK (16 digit) <span style="color:var(--danger);">*</span></label>
-        <input type="text" id="inp-nik" placeholder="16 digit NIK" maxlength="16" oninput="onInputPemilih()" autocomplete="off" style="font-family:'JetBrains Mono',monospace;letter-spacing:1px;"/>
+        <input type="text" id="inp-nik" placeholder="16 digit NIK" maxlength="16" oninput="onNIKInput()" autocomplete="off" style="font-family:'JetBrains Mono',monospace;letter-spacing:1px;"/>
+        <div id="nik-status" class="nik-status"></div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group" style="flex:1;">
+          <label>Tanggal Lahir <span class="auto-badge">AUTO</span></label>
+          <input type="date" id="inp-tgl-lahir" class="auto-filled"/>
+        </div>
+        <div class="form-group" style="flex:1;">
+          <label>Jenis Kelamin <span class="auto-badge">AUTO</span></label>
+          <select id="inp-jk" class="auto-filled">
+            <option value="">— Otomatis —</option>
+            <option value="L">Laki-laki</option>
+            <option value="P">Perempuan</option>
+          </select>
+        </div>
+        <div class="form-group" style="flex:0.6;">
+          <label>Umur</label>
+          <div id="display-umur" class="umur-display">-</div>
+        </div>
       </div>
 
       <div class="form-group">
         <label>Kader <span style="color:var(--danger);">*</span></label>
         <select id="inp-kader"><option value="">— Pilih Kader —</option></select>
-      </div>
-
-      <div class="form-group">
-        <label>Umur <span style="color:var(--danger);">*</span></label>
-        <input type="number" id="inp-umur" placeholder="Umur" min="17" max="120"/>
       </div>
 
       <div class="gap-12" style="margin-top:8px;">
@@ -87,11 +99,6 @@
 <script src="/js/pemilih.js"></script>
 <script src="/js/form-pemilih.js"></script>
 <script>
-  function formatDate(ts) {
-    return new Date(ts).toLocaleString('id-ID', {
-      day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit'
-    });
-  }
   function showToast(msg, emoji='✅') {
     const t = document.getElementById('toast');
     t.innerHTML = `${emoji} ${msg}`;
@@ -110,11 +117,13 @@
 
     if (data.error) { showPage('notfound'); return; }
 
-    document.getElementById('edit-id').value   = data.id;
-    document.getElementById('inp-nama').value  = data.nama;
-    document.getElementById('inp-nik').value   = data.nik;
-    document.getElementById('inp-umur').value  = data.umur;
-    await populateKaderSelect('inp-kader', data.kaderId);
+    document.getElementById('edit-id').value      = data.id;
+    document.getElementById('inp-nama').value     = data.nama;
+    document.getElementById('inp-nik').value      = data.nik;
+    document.getElementById('inp-tgl-lahir').value = data.tanggal_lahir ? data.tanggal_lahir.substring(0,10) : '';
+    document.getElementById('inp-jk').value       = data.jenis_kelamin || '';
+    if (data.umur != null) document.getElementById('display-umur').textContent = data.umur + ' tahun';
+    await populateKaderSelect('inp-kader', data.kader_id);
 
     showPage('form');
   }

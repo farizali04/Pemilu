@@ -16,15 +16,17 @@
     </a>
     <nav class="nav">
       <a href="/" class="active">📊 Dashboard</a>
-      <a href="/tambah-pemilih">➕ Tambah Pemilih</a>
+      <a href="/tambah-pemilih">➕ Tambah</a>
+      <a href="/import">📥 Import</a>
       <a href="/kader">🎖️ Kader</a>
+      <a href="/log-duplikat">🔍 Log Duplikat</a>
     </nav>
     <div class="header-stats">
       <div class="stat-pill"><div class="dot dot-blue"></div>Kader: <strong id="hdr-kader">…</strong></div>
       <div class="stat-pill"><div class="dot dot-green"></div>Pemilih: <strong id="hdr-pemilih">…</strong></div>
       <div class="stat-pill" style="border-color:rgba(220,38,38,.2);">
         <div class="dot" style="background:var(--danger);box-shadow:0 0 5px rgba(220,38,38,.4);"></div>
-        Duplikat: <strong id="hdr-dup" style="color:var(--danger);">…</strong>
+        Log Duplikat: <strong id="hdr-dup" style="color:var(--danger);">…</strong>
       </div>
       <div class="stat-pill"><div class="pulse-dot"></div><span style="color:var(--success);font-weight:600;font-size:12px;">Live</span></div>
     </div>
@@ -38,10 +40,10 @@
   </div>
 
   <!-- Stat Cards -->
-  <div class="grid-4" style="margin-bottom:20px;">
+  <div class="grid-3" style="margin-bottom:20px;">
     <div class="stat-card">
       <div class="sc-label">Total Pemilih</div>
-      <div class="sc-value sc-blue"  id="stat-total">…</div>
+      <div class="sc-value sc-blue" id="stat-total">…</div>
       <div class="sc-sub">orang terdaftar</div>
     </div>
     <div class="stat-card">
@@ -49,28 +51,17 @@
       <div class="sc-value sc-green" id="stat-kader">…</div>
       <div class="sc-sub">kader aktif</div>
     </div>
-    <div class="stat-card">
-      <div class="sc-label">Data Aman</div>
-      <div class="sc-value sc-green" id="stat-aman">…</div>
-      <div class="sc-sub">tidak duplikat</div>
-    </div>
     <div class="stat-card dup-card">
-      <div class="sc-label">⚠️ Duplikat</div>
+      <div class="sc-label">⚠️ Percobaan Duplikat</div>
       <div class="sc-value" style="color:var(--danger);" id="stat-dup">…</div>
-      <div class="sc-sub">perlu diperiksa</div>
+      <div class="sc-sub">tercatat di log</div>
     </div>
   </div>
 
-  <!-- Per kader & recent -->
-  <div class="grid-2" style="margin-bottom:20px;">
-    <div class="card">
-      <div class="card-title"><div class="card-icon ci-blue">📋</div> Data per Kader</div>
-      <div id="kader-breakdown"><div class="loading"><span class="spinner"></span>Memuat…</div></div>
-    </div>
-    <div class="card">
-      <div class="card-title"><div class="card-icon ci-cyan">🕐</div> Input Terbaru</div>
-      <div id="recent-list"><div class="loading"><span class="spinner"></span>Memuat…</div></div>
-    </div>
+  <!-- Per kader -->
+  <div class="card" style="margin-bottom:20px;">
+    <div class="card-title"><div class="card-icon ci-blue">📋</div> Progress Kader vs Target</div>
+    <div id="kader-breakdown"><div class="loading"><span class="spinner"></span>Memuat…</div></div>
   </div>
 
   <!-- Tabel Pemilih -->
@@ -79,22 +70,17 @@
       <div style="display:flex;align-items:center;gap:8px;">
         <div class="card-icon ci-green">👥</div> Data Pemilih
       </div>
-      <a href="/tambah-pemilih" class="btn btn-primary btn-sm" style="width:auto;">➕ Tambah</a>
+      <div style="display:flex;gap:8px;">
+        <a href="/import" class="btn btn-outline btn-sm" style="width:auto;">📥 Import Excel</a>
+        <a href="/tambah-pemilih" class="btn btn-primary btn-sm" style="width:auto;">➕ Tambah</a>
+      </div>
     </div>
 
-    <!-- Search + Filter -->
+    <!-- Search -->
     <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;align-items:center;">
       <div class="search-wrap" style="flex:1;min-width:220px;">
         <span class="search-icon">🔍</span>
-        <input type="text" id="inp-search" placeholder="Cari nama, NIK, atau kader…" oninput="onSearch(this.value)"/>
-      </div>
-      <div style="display:flex;gap:6px;flex-wrap:wrap;">
-        <button class="filter-btn active" id="btn-semua"    onclick="setFilter('semua')">🗂️ Semua</button>
-        <button class="filter-btn"        id="btn-aman"     onclick="setFilter('aman')">✅ Aman</button>
-        <button class="filter-btn"        id="btn-duplikat" onclick="setFilter('duplikat')">
-          ⚠️ Duplikat
-          <span id="badge-dup-count" style="background:rgba(220,38,38,.1);color:var(--danger);padding:1px 7px;border-radius:999px;font-size:11px;margin-left:2px;">0</span>
-        </button>
+        <input type="text" id="inp-search" placeholder="Cari nama atau NIK…" oninput="onSearch(this.value)"/>
       </div>
     </div>
 
@@ -104,11 +90,11 @@
         <thead>
           <tr>
             <th>#</th><th>Nama</th><th>NIK</th><th>Kader</th>
-            <th>Umur</th><th>Status</th><th>Waktu Input</th><th>Aksi</th>
+            <th>Tgl Lahir</th><th>L/P</th><th>Umur</th><th>Waktu Input</th><th>Aksi</th>
           </tr>
         </thead>
         <tbody id="tbody-pemilih">
-          <tr><td colspan="8"><div class="loading"><span class="spinner"></span>Memuat…</div></td></tr>
+          <tr><td colspan="9"><div class="loading"><span class="spinner"></span>Memuat…</div></td></tr>
         </tbody>
       </table>
     </div>
@@ -138,9 +124,14 @@
 <script src="/js/pemilih.js"></script>
 <script>
   function formatDate(ts) {
+    if (!ts) return '-';
     return new Date(ts).toLocaleString('id-ID', {
       day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit'
     });
+  }
+  function formatTgl(d) {
+    if (!d) return '-';
+    return new Date(d).toLocaleDateString('id-ID', { day:'2-digit', month:'short', year:'numeric' });
   }
   function showToast(msg, emoji='✅') {
     const t = document.getElementById('toast');
@@ -149,21 +140,11 @@
     setTimeout(() => t.classList.remove('show'), 3000);
   }
 
-  let activeFilter = 'semua';
   let searchQuery  = '';
   let currentPage  = 1;
   let currentLimit = 50;
   let totalPages   = 1;
   let totalData    = 0;
-
-  // ── Filter ─────────────────────────────────────────
-  function setFilter(f) {
-    activeFilter = f; currentPage = 1;
-    ['semua','aman','duplikat'].forEach(k =>
-      document.getElementById('btn-'+k).classList.remove('active','active-red'));
-    document.getElementById('btn-'+f).classList.add(f==='duplikat'?'active-red':'active');
-    loadTabel();
-  }
 
   let searchTimer = null;
   function onSearch(q) {
@@ -184,52 +165,35 @@
   // ── Load tabel ──────────────────────────────────────
   async function loadTabel() {
     document.getElementById('tbody-pemilih').innerHTML =
-      `<tr><td colspan="8"><div class="loading"><span class="spinner"></span>Memuat…</div></td></tr>`;
+      `<tr><td colspan="9"><div class="loading"><span class="spinner"></span>Memuat…</div></td></tr>`;
 
-    const dupParam = activeFilter==='duplikat' ? '1' : activeFilter==='aman' ? '0' : '';
-    const result   = await PemilihAPI.getAll(searchQuery, '', dupParam, currentPage, currentLimit);
-    const data     = Array.isArray(result) ? result : (result.data || []);
-    totalPages     = result.totalPages || 1;
-    totalData      = result.total      || data.length;
-    const startNo  = (currentPage - 1) * currentLimit;
+    const result = await PemilihAPI.getAll(searchQuery, '', currentPage, currentLimit);
+    const data   = result.data || [];
+    totalPages   = result.totalPages || 1;
+    totalData    = result.total || 0;
+    const startNo = (currentPage - 1) * currentLimit;
 
     const tbody = document.getElementById('tbody-pemilih');
     if (!data.length) {
-      tbody.innerHTML = `<tr><td colspan="8">
+      tbody.innerHTML = `<tr><td colspan="9">
         <div class="empty">
-          <div class="empty-icon">${activeFilter==='duplikat'?'✅':'🔍'}</div>
-          <p>${activeFilter==='duplikat'?'Tidak ada data duplikat. Semua aman!':'Tidak ada data ditemukan.'}</p>
+          <div class="empty-icon">🔍</div>
+          <p>Tidak ada data ditemukan.</p>
         </div></td></tr>`;
     } else {
-      tbody.innerHTML = data.map((p,i) => {
-        let dupInfo = '';
-        if (p.is_duplikat && p.duplikat_info) {
-          try {
-            const obj = typeof p.duplikat_info==='string' ? JSON.parse(p.duplikat_info) : p.duplikat_info;
-            dupInfo = obj.alasan || '';
-          } catch(_) { dupInfo = String(p.duplikat_info); }
-        }
-        const statusBadge = p.is_duplikat
-          ? `<div class="dup-tooltip">
-              <span class="badge-dup">⚠️ Duplikat</span>
-              ${dupInfo?`<div class="tip"><strong style="color:var(--danger);">Keterangan:</strong><br>${dupInfo}</div>`:''}
-             </div>`
-          : `<span class="badge badge-green">✅ Aman</span>`;
-
-        return `<tr class="${p.is_duplikat?'row-dup':''}">
+      tbody.innerHTML = data.map((p, i) => {
+        return `<tr>
           <td style="color:var(--text3);font-size:12px;">${startNo+i+1}</td>
           <td style="font-weight:700;color:var(--text);">${p.nama}</td>
           <td><span class="nik">${p.nik}</span></td>
           <td><span class="badge badge-blue">${p.namaKader||'-'}</span></td>
-          <td>${p.umur} thn</td>
-          <td>${statusBadge}</td>
+          <td style="font-size:12px;">${formatTgl(p.tanggal_lahir)}</td>
+          <td><span class="badge ${p.jenis_kelamin==='P'?'badge-pink':'badge-blue'}">${p.jenis_kelamin==='P'?'Perempuan':'Laki-laki'}</span></td>
+          <td>${p.umur != null ? p.umur + ' thn' : '-'}</td>
           <td style="font-size:12px;color:var(--text3);">${formatDate(p.created_at)}</td>
           <td>
             <div class="gap-12">
               <a href="/edit-pemilih?id=${p.id}" class="btn btn-outline btn-xs">✏️</a>
-              ${p.is_duplikat
-                ?`<button class="btn btn-xs" style="background:rgba(5,150,105,.08);border:1px solid rgba(5,150,105,.2);color:var(--success);font-family:inherit;cursor:pointer;" onclick="tandaiAman('${p.id}')">✅ Aman</button>`
-                :''}
               <button class="btn btn-danger btn-xs" onclick="konfirmasiHapusPemilih('${p.id}','${p.nama}')">🗑️</button>
             </div>
           </td>
@@ -250,11 +214,9 @@
     if (totalPages <= 1) { wrap.innerHTML = ''; return; }
 
     let btns = `<button class="page-btn" onclick="goToPage(${currentPage-1})" ${currentPage===1?'disabled':''}>←</button>`;
-
     const range = 2;
     let sp = Math.max(1, currentPage-range);
     let ep = Math.min(totalPages, currentPage+range);
-
     if (sp > 1) {
       btns += `<button class="page-btn" onclick="goToPage(1)">1</button>`;
       if (sp > 2) btns += `<span style="color:var(--text3);padding:0 2px;">…</span>`;
@@ -269,17 +231,6 @@
     wrap.innerHTML = btns;
   }
 
-  // ── Tandai aman ──────────────────────────────────────
-  async function tandaiAman(id) {
-    if (!confirm('Tandai data ini sebagai AMAN?')) return;
-    await fetch(`/api/pemilih/${id}/duplikat`, {
-      method:'PUT', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ isDuplikat: false, info: null })
-    });
-    showToast('Data ditandai aman ✅');
-    loadSemua();
-  }
-
   // ── Load dashboard ──────────────────────────────────
   async function loadSemua() {
     const [kaders, statRes] = await Promise.all([
@@ -288,52 +239,39 @@
     ]);
 
     document.getElementById('hdr-kader').textContent   = kaders.length;
-    document.getElementById('hdr-pemilih').textContent = statRes.total    || 0;
-    document.getElementById('hdr-dup').textContent     = statRes.duplikat || 0;
-    document.getElementById('stat-total').textContent  = statRes.total    || 0;
-    document.getElementById('stat-kader').textContent  = kaders.length;
-    document.getElementById('stat-aman').textContent   = statRes.aman     || 0;
-    document.getElementById('stat-dup').textContent    = statRes.duplikat || 0;
-    document.getElementById('badge-dup-count').textContent = statRes.duplikat || 0;
+    document.getElementById('hdr-pemilih').textContent  = statRes.total || 0;
+    document.getElementById('hdr-dup').textContent      = statRes.percobaanDuplikat || 0;
+    document.getElementById('stat-total').textContent   = statRes.total || 0;
+    document.getElementById('stat-kader').textContent   = kaders.length;
+    document.getElementById('stat-dup').textContent     = statRes.percobaanDuplikat || 0;
 
-    // Per kader
-    const kb    = document.getElementById('kader-breakdown');
-    const total = statRes.total || 1;
+    // Per kader — progress vs target
+    const kb = document.getElementById('kader-breakdown');
     if (!kaders.length) {
       kb.innerHTML = '<div class="empty"><div class="empty-icon">📭</div><p>Belum ada kader.</p></div>';
     } else {
       kb.innerHTML = kaders.map(k => {
-        const pct = Math.round(k.jumlahPemilih / total * 100);
-        return `<div style="margin-bottom:14px;">
+        const target = k.target_suara || 0;
+        const pct = target > 0 ? Math.min(100, Math.round(k.jumlahPemilih / target * 100)) : 0;
+        const barColor = pct >= 100 ? 'var(--success)' : pct >= 50 ? 'var(--accent)' : 'var(--warning)';
+        return `<div style="margin-bottom:16px;">
           <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
             <span style="font-size:13px;font-weight:600;color:var(--text);">Kader ${k.nomor} — ${k.nama}</span>
-            <span style="font-size:13px;color:var(--accent);font-family:'JetBrains Mono',monospace;">${k.jumlahPemilih} orang</span>
+            <span style="font-size:13px;font-family:'JetBrains Mono',monospace;">
+              <span style="color:${barColor};font-weight:700;">${k.jumlahPemilih}</span>
+              ${target > 0 ? `<span style="color:var(--text3);"> / ${target} target</span>` : '<span style="color:var(--text3);"> (tanpa target)</span>'}
+              ${target > 0 ? `<span style="margin-left:8px;font-weight:700;color:${barColor};">${pct}%</span>` : ''}
+            </span>
           </div>
-          <div style="background:var(--surface3);border-radius:999px;height:7px;overflow:hidden;border:1px solid var(--border);">
-            <div style="background:linear-gradient(90deg,var(--accent),var(--accent2));height:100%;width:${pct}%;border-radius:999px;transition:width .6s;"></div>
-          </div>
+          ${target > 0 ? `
+          <div class="progress-bar-track">
+            <div class="progress-bar-fill" style="width:${pct}%;background:${barColor};"></div>
+          </div>` : `
+          <div class="progress-bar-track">
+            <div class="progress-bar-fill" style="width:0%;"></div>
+          </div>`}
         </div>`;
       }).join('');
-    }
-
-    // Recent
-    const recentRes = await fetch('/api/pemilih?limit=6&page=1').then(r => r.json());
-    const recent    = Array.isArray(recentRes) ? recentRes : (recentRes.data || []);
-    const rl        = document.getElementById('recent-list');
-    if (!recent.length) {
-      rl.innerHTML = '<div class="empty"><div class="empty-icon">📭</div><p>Belum ada data masuk.</p></div>';
-    } else {
-      rl.innerHTML = recent.map(p => `
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border);">
-          <div>
-            <div style="display:flex;align-items:center;gap:6px;">
-              <span style="font-weight:600;font-size:13px;color:var(--text);">${p.nama}</span>
-              ${p.is_duplikat?'<span class="badge-dup" style="font-size:10px;padding:2px 6px;">⚠️</span>':''}
-            </div>
-            <div style="font-size:12px;color:var(--text3);">${p.namaKader} · ${p.umur} thn</div>
-          </div>
-          <div style="font-size:11px;color:var(--text3);">${formatDate(p.created_at)}</div>
-        </div>`).join('');
     }
 
     loadTabel();

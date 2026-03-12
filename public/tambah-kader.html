@@ -16,8 +16,10 @@
     </a>
     <nav class="nav">
       <a href="/">📊 Dashboard</a>
-      <a href="/tambah-pemilih">➕ Tambah Pemilih</a>
+      <a href="/tambah-pemilih">➕ Tambah</a>
+      <a href="/import">📥 Import</a>
       <a href="/kader" class="active">🎖️ Kader</a>
+      <a href="/log-duplikat">🔍 Log</a>
     </nav>
   </div>
 </header>
@@ -35,7 +37,7 @@
     <div class="card-title"><div class="card-icon ci-green">🎖️</div> Form Data Kader</div>
 
     <div id="alert-success" class="alert-success"></div>
-    <div id="alert-error"   class="alert-error"></div>
+    <div id="alert-error" class="alert-error"></div>
 
     <div class="form-group">
       <label>Nama Kader <span style="color:var(--danger);">*</span></label>
@@ -46,6 +48,12 @@
       <label>Nomor Kader <span style="color:var(--danger);">*</span></label>
       <input type="number" id="kader-nomor" placeholder="Contoh: 1, 2, 3…" min="1"/>
       <div class="hint">Nomor urut unik untuk membedakan antar kader.</div>
+    </div>
+
+    <div class="form-group">
+      <label>Target Suara</label>
+      <input type="number" id="kader-target" placeholder="Contoh: 500" min="0"/>
+      <div class="hint">Target jumlah pemilih yang harus dikumpulkan kader ini. Kosongkan jika belum ada target.</div>
     </div>
 
     <div class="gap-12" style="margin-top:8px;">
