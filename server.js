@@ -154,8 +154,9 @@ app.get('/api/pemilih', async (req, res) => {
 app.get('/api/pemilih/statistik', async (req, res) => {
   try {
     const [total]   = await query('SELECT COUNT(*) AS n FROM pemilih');
-    const [logDup]  = await query('SELECT COUNT(*) AS n FROM log_duplikat');
-    res.json({ total: total.n, percobaanDuplikat: logDup.n });
+    const [logDup]  = await query('SELECT COALESCE(SUM(jumlah_percobaan), 0) AS n FROM log_duplikat');
+    const [logRows] = await query('SELECT COUNT(*) AS n FROM log_duplikat');
+    res.json({ total: total.n, percobaanDuplikat: logDup.n, entryDuplikat: logRows.n });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -204,10 +205,14 @@ app.post('/api/pemilih', async (req, res) => {
     `, [nik]);
 
     if (nikDup.length) {
-      // Catat percobaan duplikat di log
+      // UPSERT: increment counter jika sudah ada, insert jika belum
       await query(
         `INSERT INTO log_duplikat (nik_target, nama_input, kader_id_pelaku, kader_id_existing, nama_existing)
-         VALUES (?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+           jumlah_percobaan = jumlah_percobaan + 1,
+           waktu_terakhir = CURRENT_TIMESTAMP,
+           nama_input = VALUES(nama_input)`,
         [nik, nama.trim(), kaderId, nikDup[0].kader_id, nikDup[0].nama]
       );
 
@@ -309,10 +314,14 @@ app.post('/api/pemilih/import', upload.single('file'), async (req, res) => {
       // Cek duplikat
       const nikDup = await query('SELECT nama, kader_id FROM pemilih WHERE nik = ?', [nik]);
       if (nikDup.length) {
-        // Log ke tabel kecurangan
+        // UPSERT: increment counter jika sudah ada
         await query(
           `INSERT INTO log_duplikat (nik_target, nama_input, kader_id_pelaku, kader_id_existing, nama_existing)
-           VALUES (?, ?, ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?)
+           ON DUPLICATE KEY UPDATE
+             jumlah_percobaan = jumlah_percobaan + 1,
+             waktu_terakhir = CURRENT_TIMESTAMP,
+             nama_input = VALUES(nama_input)`,
           [nik, nama, kaderId, nikDup[0].kader_id, nikDup[0].nama]
         );
         hasil.gagal++;
@@ -356,14 +365,15 @@ app.get('/api/log-duplikat', async (req, res) => {
     );
 
     const data = await query(`
-      SELECT l.*,
+      SELECT l.nik_target, l.nama_input, l.kader_id_pelaku, l.kader_id_existing,
+             l.nama_existing, l.jumlah_percobaan, l.waktu_pertama, l.waktu_terakhir,
              CONCAT('Kader ', kp.nomor, ' — ', kp.nama) AS kaderPelaku,
              CONCAT('Kader ', ke.nomor, ' — ', ke.nama) AS kaderExisting
       FROM log_duplikat l
       LEFT JOIN kader kp ON kp.id = l.kader_id_pelaku
       LEFT JOIN kader ke ON ke.id = l.kader_id_existing
       ${where}
-      ORDER BY l.created_at DESC
+      ORDER BY l.waktu_terakhir DESC
       LIMIT ? OFFSET ?
     `, [...params, lim, offset]);
 
@@ -378,13 +388,16 @@ app.get('/api/log-duplikat', async (req, res) => {
 
 app.get('/api/log-duplikat/statistik', async (req, res) => {
   try {
-    const [total] = await query('SELECT COUNT(*) AS n FROM log_duplikat');
+    const [totalPercobaan] = await query('SELECT COALESCE(SUM(jumlah_percobaan), 0) AS n FROM log_duplikat');
+    const [totalNIK]       = await query('SELECT COUNT(*) AS n FROM log_duplikat');
     const perKader = await query(`
-      SELECT CONCAT('Kader ', k.nomor, ' — ', k.nama) AS kader, COUNT(*) AS jumlah
+      SELECT CONCAT('Kader ', k.nomor, ' — ', k.nama) AS kader,
+             COUNT(DISTINCT l.nik_target) AS nikDirebut,
+             SUM(l.jumlah_percobaan) AS totalSpam
       FROM log_duplikat l JOIN kader k ON k.id = l.kader_id_pelaku
-      GROUP BY l.kader_id_pelaku ORDER BY jumlah DESC
+      GROUP BY l.kader_id_pelaku ORDER BY totalSpam DESC
     `);
-    res.json({ total: total.n, perKader });
+    res.json({ totalPercobaan: totalPercobaan.n, totalNIK: totalNIK.n, perKader });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

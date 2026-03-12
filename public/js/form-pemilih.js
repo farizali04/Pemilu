@@ -1,9 +1,10 @@
 // ════════════════════════════════════════
-//  form-pemilih.js — Logic Form Pemilih (v2)
-//  Auto-parse NIK → Tanggal Lahir & Jenis Kelamin
+//  form-pemilih.js — Logic Form Pemilih (v3)
+//  Anti-Tremor + Auto-parse NIK
 // ════════════════════════════════════════
 
 let nikCheckTimeout = null;
+let isSubmitting = false; // Anti-tremor flag
 
 // ── Parse NIK → tanggal lahir & jenis kelamin ────────
 function parseNIK(nik) {
@@ -63,14 +64,9 @@ function onNIKInput() {
   clearTimeout(nikCheckTimeout);
   nikCheckTimeout = setTimeout(async () => {
     if (nik.length !== 16) return;
-    const editId = document.getElementById('edit-id')?.value;
     const result = await PemilihAPI.cekNIK(nik);
 
     if (result.exists) {
-      // Jika sedang edit dan NIK milik data yg sama, abaikan
-      if (editId && result.data) {
-        // Cek apakah itu data sendiri (kita tidak punya id di cek-nik, jadi skip)
-      }
       if (nikStatus) {
         nikStatus.className = 'nik-status nik-danger';
         nikStatus.innerHTML = `🔴 <strong>NIK SUDAH TERDAFTAR</strong> — ${result.data.nama} (${result.data.namaKader})`;
@@ -84,8 +80,28 @@ function onNIKInput() {
   }, 300);
 }
 
+// ── Helpers: Lock / Unlock tombol submit ─────────────
+function lockSubmitButton(btnSelector) {
+  const btn = document.querySelector(btnSelector || '.btn-primary');
+  if (!btn) return;
+  isSubmitting = true;
+  btn.disabled = true;
+  btn._originalHTML = btn.innerHTML;
+  btn.innerHTML = '<span class="spinner" style="width:14px;height:14px;border-width:2px;margin-right:6px;vertical-align:middle;"></span> Memeriksa Data…';
+}
+
+function unlockSubmitButton(btnSelector) {
+  const btn = document.querySelector(btnSelector || '.btn-primary');
+  if (!btn) return;
+  isSubmitting = false;
+  btn.disabled = false;
+  btn.innerHTML = btn._originalHTML || '💾 Simpan';
+}
+
 // ── Submit TAMBAH ─────────────────────────────────────
 async function submitTambahPemilih() {
+  if (isSubmitting) return; // Anti-tremor: tolak klik ganda
+
   const nama         = document.getElementById('inp-nama').value.trim();
   const nik          = document.getElementById('inp-nik').value.trim();
   const kaderId      = document.getElementById('inp-kader').value;
@@ -96,21 +112,33 @@ async function submitTambahPemilih() {
   if (!nama || !nik || !kaderId) { showError('Nama, NIK, dan Kader wajib diisi!'); return; }
   if (nik.length !== 16 || isNaN(nik)) { showError('NIK harus 16 digit angka!'); return; }
 
-  const res = await PemilihAPI.tambah({ nama, nik, kaderId, tanggalLahir, jenisKelamin });
+  // ═══ KUNCI TOMBOL ═══
+  lockSubmitButton();
 
-  if (res.error) {
-    showError(res.error);
-    return;
+  try {
+    const res = await PemilihAPI.tambah({ nama, nik, kaderId, tanggalLahir, jenisKelamin });
+
+    if (res.error) {
+      showError(res.error);
+      unlockSubmitButton();
+      return;
+    }
+
+    showSuccess(`${nama} berhasil didaftarkan!`);
+    resetFormPemilih();
+    showToast(`✅ ${nama} berhasil disimpan!`);
+    // Jangan unlock — langsung redirect
+    setTimeout(() => { window.location.href = '/'; }, 1800);
+  } catch (e) {
+    showError('Terjadi kesalahan jaringan. Coba lagi.');
+    unlockSubmitButton();
   }
-
-  showSuccess(`${nama} berhasil didaftarkan!`);
-  resetFormPemilih();
-  showToast(`✅ ${nama} berhasil disimpan!`);
-  setTimeout(() => { window.location.href = '/'; }, 1800);
 }
 
 // ── Submit EDIT ───────────────────────────────────────
 async function submitEditPemilih() {
+  if (isSubmitting) return; // Anti-tremor
+
   const id           = document.getElementById('edit-id').value;
   const nama         = document.getElementById('inp-nama').value.trim();
   const nik          = document.getElementById('inp-nik').value.trim();
@@ -122,12 +150,19 @@ async function submitEditPemilih() {
   if (!nama || !nik || !kaderId) { showError('Semua field wajib diisi!'); return; }
   if (nik.length !== 16 || isNaN(nik)) { showError('NIK harus 16 digit angka!'); return; }
 
-  const res = await PemilihAPI.edit(id, { nama, nik, kaderId, tanggalLahir, jenisKelamin });
-  if (res.error) { showError(res.error); return; }
+  lockSubmitButton();
 
-  showSuccess('Data berhasil diperbarui!');
-  showToast('✅ Data pemilih diperbarui!');
-  setTimeout(() => { window.location.href = '/'; }, 1500);
+  try {
+    const res = await PemilihAPI.edit(id, { nama, nik, kaderId, tanggalLahir, jenisKelamin });
+    if (res.error) { showError(res.error); unlockSubmitButton(); return; }
+
+    showSuccess('Data berhasil diperbarui!');
+    showToast('✅ Data pemilih diperbarui!');
+    setTimeout(() => { window.location.href = '/'; }, 1500);
+  } catch (e) {
+    showError('Terjadi kesalahan jaringan. Coba lagi.');
+    unlockSubmitButton();
+  }
 }
 
 // ── Helpers ───────────────────────────────────────────
@@ -151,6 +186,8 @@ function showError(msg) {
   if (!el) return;
   el.textContent = '❌ ' + msg;
   el.classList.add('show');
+  // Scroll ke alert agar user pasti lihat
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
 function showSuccess(msg) {
