@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Kelola Kader — Pendataan</title>
+  <link rel="stylesheet" href="/css/style.css"/>
+</head>
+<body>
+
+<header>
+  <div class="container header-inner">
+    <a href="/" class="logo">
+      <div class="logo-icon">🗳️</div>
+      <div class="logo-text">Data<span>Pilih</span></div>
+    </a>
+    <nav class="nav">
+      <a href="/">📊 Dashboard</a>
+      <a href="/tambah-pemilih">➕ Tambah Pemilih</a>
+      <a href="/kader" class="active">🎖️ Kader</a>
+    </nav>
+  </div>
+</header>
+
+<div class="container">
+  <div class="page-header" style="display:flex;align-items:flex-end;justify-content:space-between;">
+    <div>
+      <div class="breadcrumb"><a href="/">Dashboard</a> › <span>Kelola Kader</span></div>
+      <h1>Kelola Kader</h1>
+      <p>Tambah dan kelola data kader yang bertugas mendata pemilih.</p>
+    </div>
+    <a href="/tambah-kader" class="btn btn-green" style="width:auto;margin-bottom:2px;">➕ Tambah Kader</a>
+  </div>
+
+  <div class="card">
+    <div class="card-title"><div class="card-icon ci-blue">🎖️</div> Daftar Semua Kader</div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Kader ke-</th>
+            <th>Nama Kader</th>
+            <th>Jumlah Orang</th>
+            <th>Ditambahkan</th>
+            <th>Aksi</th>
+          </tr>
+        </thead>
+        <tbody id="tbody-kader">
+          <tr><td colspan="5"><div class="loading"><span class="spinner"></span>Memuat…</div></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="/js/kader.js"></script>
+<script>
+  function formatDate(ts) {
+    return new Date(ts).toLocaleString('id-ID', {
+      day:'2-digit', month:'short', year:'numeric'
+    });
+  }
+  function showToast(msg, emoji='✅') {
+    const t = document.getElementById('toast');
+    t.innerHTML = `${emoji} ${msg}`;
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 3000);
+  }
+
+  async function loadKader() {
+    const data = await KaderAPI.getAll();
+    const tbody = document.getElementById('tbody-kader');
+
+    if (data.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="5">
+        <div class="empty"><div class="empty-icon">🎖️</div>
+        <p>Belum ada kader. <a href="/tambah-kader" style="color:var(--accent);">Tambah kader pertama</a></p></div>
+      </td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = data.map(k => `
+      <tr>
+        <td><span class="badge badge-blue">Kader ${k.nomor}</span></td>
+        <td style="font-weight:600;color:var(--text);">${k.nama}</td>
+        <td><span class="badge badge-green">${k.jumlahPemilih} orang</span></td>
+        <td style="font-size:12px;color:var(--text3);">${formatDate(k.createdAt)}</td>
+        <td>
+          <div class="gap-12">
+            <a href="/edit-kader?id=${k.id}" class="btn btn-outline btn-xs">✏️ Edit</a>
+            <button class="btn btn-danger btn-xs" onclick="konfirmasiHapusKader('${k.id}','${k.nama}',${k.nomor})">🗑️ Hapus</button>
+          </div>
+        </td>
+      </tr>
+    `).join('');
+  }
+
+  loadKader();
+</script>
+</body>
+</html>
