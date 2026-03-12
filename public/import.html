@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Import Excel — Pendataan</title>
+  <link rel="stylesheet" href="/css/style.css"/>
+</head>
+<body>
+
+<header>
+  <div class="container header-inner">
+    <a href="/" class="logo">
+      <div class="logo-icon">🗳️</div>
+      <div class="logo-text">Data<span>Pilih</span></div>
+    </a>
+    <nav class="nav">
+      <a href="/">📊 Dashboard</a>
+      <a href="/tambah-pemilih">➕ Tambah</a>
+      <a href="/import" class="active">📥 Import</a>
+      <a href="/kader">🎖️ Kader</a>
+      <a href="/log-duplikat">🔍 Log</a>
+    </nav>
+  </div>
+</header>
+
+<div class="container-sm">
+  <div class="page-header">
+    <div class="breadcrumb">
+      <a href="/">Dashboard</a> › <span>Import Excel</span>
+    </div>
+    <h1>Import Data dari Excel</h1>
+    <p>Upload file Excel (.xlsx/.xls) untuk memasukkan data pemilih secara massal.</p>
+  </div>
+
+  <div class="card">
+    <div class="card-title"><div class="card-icon ci-cyan">📥</div> Upload File Excel</div>
+
+    <div id="alert-success" class="alert-success"></div>
+    <div id="alert-error" class="alert-error"></div>
+
+    <!-- Drop zone -->
+    <div id="drop-zone" class="drop-zone" onclick="document.getElementById('file-input').click()">
+      <input type="file" id="file-input" accept=".xlsx,.xls,.csv" style="display:none" onchange="onFileSelected(this)"/>
+      <div class="drop-icon">📄</div>
+      <div class="drop-text">Klik di sini atau drag & drop file Excel</div>
+      <div class="drop-hint">.xlsx, .xls, .csv — maksimal 10MB</div>
+    </div>
+
+    <div id="file-info" class="file-info" style="display:none;">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <span style="font-size:20px;">📊</span>
+        <div>
+          <div id="file-name" style="font-weight:600;font-size:14px;color:var(--text);"></div>
+          <div id="file-size" style="font-size:12px;color:var(--text3);"></div>
+        </div>
+      </div>
+      <button class="btn btn-outline btn-xs" onclick="clearFile()">✕ Hapus</button>
+    </div>
+
+    <div class="form-group" style="margin-top:16px;">
+      <label>Kader Tujuan <span style="color:var(--danger);">*</span></label>
+      <select id="inp-kader">
+        <option value="">— Pilih Kader —</option>
+      </select>
+      <div class="hint">Semua data dari Excel akan didaftarkan ke kader ini.</div>
+    </div>
+
+    <button class="btn btn-primary" onclick="submitImport()" id="btn-import" disabled>
+      📥 Mulai Import
+    </button>
+  </div>
+
+  <!-- Hasil import -->
+  <div id="result-wrap" style="display:none;" class="card mt-24">
+    <div class="card-title"><div class="card-icon ci-green">📋</div> Hasil Import</div>
+
+    <div class="grid-3" style="margin-bottom:16px;">
+      <div class="stat-card" style="padding:14px;">
+        <div class="sc-label" style="font-size:10px;">Berhasil</div>
+        <div class="sc-value sc-green" id="res-berhasil" style="font-size:24px;">0</div>
+      </div>
+      <div class="stat-card" style="padding:14px;">
+        <div class="sc-label" style="font-size:10px;">Gagal / Duplikat</div>
+        <div class="sc-value" style="font-size:24px;color:var(--danger);" id="res-gagal">0</div>
+      </div>
+      <div class="stat-card" style="padding:14px;">
+        <div class="sc-label" style="font-size:10px;">Total Baris</div>
+        <div class="sc-value sc-blue" id="res-total" style="font-size:24px;">0</div>
+      </div>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Baris</th><th>Nama</th><th>NIK</th><th>Status</th><th>Keterangan</th>
+          </tr>
+        </thead>
+        <tbody id="tbody-result"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Format panduan -->
+  <div class="card mt-24">
+    <div class="card-title"><div class="card-icon ci-orange">ℹ️</div> Format File Excel</div>
+    <div style="font-size:13px;color:var(--text2);line-height:1.9;">
+      <p style="margin-bottom:10px;">File Excel harus memiliki kolom berikut di baris pertama (header):</p>
+      <div class="table-wrap" style="margin-bottom:12px;">
+        <table>
+          <thead>
+            <tr><th>nama</th><th>nik</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Ahmad Suparjo</td><td>3404010101900001</td></tr>
+            <tr><td>Siti Aminah</td><td>3404015501850002</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>⚠️ NIK yang sudah ada di database akan <strong>ditolak</strong> dan dicatat di <a href="/log-duplikat" style="color:var(--accent);">Log Duplikat</a>.</p>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="/js/kader.js"></script>
+<script src="/js/pemilih.js"></script>
+<script>
+  function showToast(msg, emoji='✅') {
+    const t = document.getElementById('toast');
+    t.innerHTML = `${emoji} ${msg}`;
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 3000);
+  }
+
+  let selectedFile = null;
+
+  // Drop zone events
+  const dropZone = document.getElementById('drop-zone');
+  dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+  dropZone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropZone.classList.remove('drag-over');
+    if (e.dataTransfer.files.length) {
+      document.getElementById('file-input').files = e.dataTransfer.files;
+      onFileSelected(document.getElementById('file-input'));
+    }
+  });
+
+  function onFileSelected(input) {
+    const file = input.files[0];
+    if (!file) return;
+    selectedFile = file;
+    document.getElementById('file-name').textContent = file.name;
+    document.getElementById('file-size').textContent = (file.size / 1024).toFixed(1) + ' KB';
+    document.getElementById('drop-zone').style.display = 'none';
+    document.getElementById('file-info').style.display = 'flex';
+    checkReady();
+  }
+
+  function clearFile() {
+    selectedFile = null;
+    document.getElementById('file-input').value = '';
+    document.getElementById('drop-zone').style.display = '';
+    document.getElementById('file-info').style.display = 'none';
+    checkReady();
+  }
+
+  function checkReady() {
+    const kaderId = document.getElementById('inp-kader').value;
+    document.getElementById('btn-import').disabled = !selectedFile || !kaderId;
+  }
+
+  document.getElementById('inp-kader').addEventListener('change', checkReady);
+
+  async function submitImport() {
+    const kaderId = document.getElementById('inp-kader').value;
+    if (!selectedFile || !kaderId) return;
+
+    const btn = document.getElementById('btn-import');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner" style="width:14px;height:14px;border-width:2px;margin-right:6px;"></span>Mengimport…';
+
+    const formData = new FormData();
+    formData.append('file', selectedFile);
+    formData.append('kaderId', kaderId);
+
+    try {
+      const result = await PemilihAPI.importExcel(formData);
+
+      if (result.error) {
+        document.getElementById('alert-error').textContent = '❌ ' + result.error;
+        document.getElementById('alert-error').classList.add('show');
+        btn.disabled = false;
+        btn.innerHTML = '📥 Mulai Import';
+        return;
+      }
+
+      // Show results
+      document.getElementById('res-berhasil').textContent = result.berhasil;
+      document.getElementById('res-gagal').textContent    = result.gagal;
+      document.getElementById('res-total').textContent    = result.berhasil + result.gagal;
+
+      const tbody = document.getElementById('tbody-result');
+      tbody.innerHTML = (result.detail || []).map(d => `
+        <tr class="${d.status === 'gagal' || d.status === 'duplikat' ? 'row-dup' : ''}">
+          <td style="color:var(--text3);">${d.baris}</td>
+          <td style="font-weight:600;">${d.nama || '-'}</td>
+          <td><span class="nik">${d.nik || '-'}</span></td>
+          <td>
+            ${d.status === 'berhasil'
+              ? '<span class="badge badge-green">✅ Berhasil</span>'
+              : d.status === 'duplikat'
+              ? '<span class="badge badge-red">⚠️ Duplikat</span>'
+              : '<span class="badge badge-orange">❌ Gagal</span>'}
+          </td>
+          <td style="font-size:12px;color:var(--text3);">${d.alasan || '-'}</td>
+        </tr>
+      `).join('');
+
+      document.getElementById('result-wrap').style.display = 'block';
+      document.getElementById('result-wrap').scrollIntoView({ behavior:'smooth' });
+
+      showToast(`Import selesai: ${result.berhasil} berhasil, ${result.gagal} gagal`);
+    } catch (e) {
+      document.getElementById('alert-error').textContent = '❌ Terjadi kesalahan: ' + e.message;
+      document.getElementById('alert-error').classList.add('show');
+    }
+
+    btn.disabled = false;
+    btn.innerHTML = '📥 Mulai Import';
+  }
+
+  populateKaderSelect();
+</script>
+</body>
+</html>

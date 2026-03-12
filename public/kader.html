@@ -16,8 +16,10 @@
     </a>
     <nav class="nav">
       <a href="/">📊 Dashboard</a>
-      <a href="/tambah-pemilih">➕ Tambah Pemilih</a>
+      <a href="/tambah-pemilih">➕ Tambah</a>
+      <a href="/import">📥 Import</a>
       <a href="/kader" class="active">🎖️ Kader</a>
+      <a href="/log-duplikat">🔍 Log</a>
     </nav>
   </div>
 </header>
@@ -41,12 +43,14 @@
             <th>Kader ke-</th>
             <th>Nama Kader</th>
             <th>Jumlah Orang</th>
+            <th>Target Suara</th>
+            <th>Progress</th>
             <th>Ditambahkan</th>
             <th>Aksi</th>
           </tr>
         </thead>
         <tbody id="tbody-kader">
-          <tr><td colspan="5"><div class="loading"><span class="spinner"></span>Memuat…</div></td></tr>
+          <tr><td colspan="7"><div class="loading"><span class="spinner"></span>Memuat…</div></td></tr>
         </tbody>
       </table>
     </div>
@@ -58,9 +62,7 @@
 <script src="/js/kader.js"></script>
 <script>
   function formatDate(ts) {
-    return new Date(ts).toLocaleString('id-ID', {
-      day:'2-digit', month:'short', year:'numeric'
-    });
+    return new Date(ts).toLocaleString('id-ID', { day:'2-digit', month:'short', year:'numeric' });
   }
   function showToast(msg, emoji='✅') {
     const t = document.getElementById('toast');
@@ -74,19 +76,33 @@
     const tbody = document.getElementById('tbody-kader');
 
     if (data.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="5">
+      tbody.innerHTML = `<tr><td colspan="7">
         <div class="empty"><div class="empty-icon">🎖️</div>
         <p>Belum ada kader. <a href="/tambah-kader" style="color:var(--accent);">Tambah kader pertama</a></p></div>
       </td></tr>`;
       return;
     }
 
-    tbody.innerHTML = data.map(k => `
+    tbody.innerHTML = data.map(k => {
+      const target = k.target_suara || 0;
+      const pct = target > 0 ? Math.min(100, Math.round(k.jumlahPemilih / target * 100)) : 0;
+      const barColor = pct >= 100 ? 'var(--success)' : pct >= 50 ? 'var(--accent)' : 'var(--warning)';
+      return `
       <tr>
         <td><span class="badge badge-blue">Kader ${k.nomor}</span></td>
         <td style="font-weight:600;color:var(--text);">${k.nama}</td>
         <td><span class="badge badge-green">${k.jumlahPemilih} orang</span></td>
-        <td style="font-size:12px;color:var(--text3);">${formatDate(k.createdAt)}</td>
+        <td style="font-family:'JetBrains Mono',monospace;font-size:13px;">${target > 0 ? target : '<span style="color:var(--text3);">-</span>'}</td>
+        <td style="min-width:120px;">
+          ${target > 0 ? `
+          <div style="display:flex;align-items:center;gap:8px;">
+            <div class="progress-bar-track" style="flex:1;">
+              <div class="progress-bar-fill" style="width:${pct}%;background:${barColor};"></div>
+            </div>
+            <span style="font-size:12px;font-weight:700;color:${barColor};font-family:'JetBrains Mono',monospace;">${pct}%</span>
+          </div>` : '<span style="color:var(--text3);font-size:12px;">—</span>'}
+        </td>
+        <td style="font-size:12px;color:var(--text3);">${formatDate(k.created_at)}</td>
         <td>
           <div class="gap-12">
             <a href="/edit-kader?id=${k.id}" class="btn btn-outline btn-xs">✏️ Edit</a>
@@ -94,7 +110,7 @@
           </div>
         </td>
       </tr>
-    `).join('');
+    `}).join('');
   }
 
   loadKader();

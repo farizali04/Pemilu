@@ -1,76 +1,128 @@
 // ════════════════════════════════════════
-//  form-pemilih.js — Logic Form Pemilih
+//  form-pemilih.js — Logic Form Pemilih (v2)
+//  Auto-parse NIK → Tanggal Lahir & Jenis Kelamin
 // ════════════════════════════════════════
 
-let dupTimeout      = null;
-let duplikatSaatIni = []; // hasil cek duplikat terakhir
+let nikCheckTimeout = null;
 
-// ── Real-time cek duplikat ────────────────────────────
-function onInputPemilih() {
-  clearTimeout(dupTimeout);
-  dupTimeout = setTimeout(async () => {
-    const nama = document.getElementById('inp-nama')?.value.trim() || '';
-    const nik  = document.getElementById('inp-nik')?.value.trim()  || '';
-    if (!nama && !nik) {
-      document.getElementById('alert-dup')?.classList.remove('show');
-      duplikatSaatIni = [];
-      return;
-    }
-    const dups   = await PemilihAPI.cekDuplikat(nama, nik);
+// ── Parse NIK → tanggal lahir & jenis kelamin ────────
+function parseNIK(nik) {
+  if (!nik || nik.length !== 16 || isNaN(nik)) return null;
+  let tanggal = parseInt(nik.substring(6, 8));
+  const bulan = parseInt(nik.substring(8, 10));
+  let tahun   = parseInt(nik.substring(10, 12));
+
+  let jenisKelamin = 'L';
+  if (tanggal > 40) {
+    jenisKelamin = 'P';
+    tanggal -= 40;
+  }
+
+  const currentYear2Digit = new Date().getFullYear() % 100;
+  tahun = tahun <= currentYear2Digit ? 2000 + tahun : 1900 + tahun;
+
+  if (bulan < 1 || bulan > 12 || tanggal < 1 || tanggal > 31) return null;
+
+  const tgl = `${tahun}-${String(bulan).padStart(2, '0')}-${String(tanggal).padStart(2, '0')}`;
+
+  // Hitung umur
+  const lahir = new Date(tgl);
+  const now   = new Date();
+  let umur    = now.getFullYear() - lahir.getFullYear();
+  const m     = now.getMonth() - lahir.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < lahir.getDate())) umur--;
+
+  return { tanggalLahir: tgl, jenisKelamin, umur };
+}
+
+// ── Event: NIK berubah → auto-fill & cek duplikat ────
+function onNIKInput() {
+  const nik = document.getElementById('inp-nik').value.trim();
+  const tglEl  = document.getElementById('inp-tgl-lahir');
+  const jkEl   = document.getElementById('inp-jk');
+  const umurEl = document.getElementById('display-umur');
+  const nikStatus = document.getElementById('nik-status');
+
+  // Reset fields
+  if (tglEl)  tglEl.value = '';
+  if (jkEl)   jkEl.value  = '';
+  if (umurEl) umurEl.textContent = '';
+  if (nikStatus) { nikStatus.className = 'nik-status'; nikStatus.textContent = ''; }
+
+  if (nik.length < 16) return;
+
+  // Auto-fill dari NIK
+  const parsed = parseNIK(nik);
+  if (parsed) {
+    if (tglEl)  tglEl.value = parsed.tanggalLahir;
+    if (jkEl)   jkEl.value  = parsed.jenisKelamin;
+    if (umurEl) umurEl.textContent = `${parsed.umur} tahun`;
+  }
+
+  // Cek duplikat real-time
+  clearTimeout(nikCheckTimeout);
+  nikCheckTimeout = setTimeout(async () => {
+    if (nik.length !== 16) return;
     const editId = document.getElementById('edit-id')?.value;
-    duplikatSaatIni = editId ? dups.filter(d => d.pemilih.id !== editId) : dups;
-    renderDupAlert(duplikatSaatIni);
-  }, 400);
+    const result = await PemilihAPI.cekNIK(nik);
+
+    if (result.exists) {
+      // Jika sedang edit dan NIK milik data yg sama, abaikan
+      if (editId && result.data) {
+        // Cek apakah itu data sendiri (kita tidak punya id di cek-nik, jadi skip)
+      }
+      if (nikStatus) {
+        nikStatus.className = 'nik-status nik-danger';
+        nikStatus.innerHTML = `🔴 <strong>NIK SUDAH TERDAFTAR</strong> — ${result.data.nama} (${result.data.namaKader})`;
+      }
+    } else {
+      if (nikStatus) {
+        nikStatus.className = 'nik-status nik-safe';
+        nikStatus.innerHTML = `🟢 NIK tersedia`;
+      }
+    }
+  }, 300);
 }
 
 // ── Submit TAMBAH ─────────────────────────────────────
 async function submitTambahPemilih() {
-  const nama    = document.getElementById('inp-nama').value.trim();
-  const nik     = document.getElementById('inp-nik').value.trim();
-  const kaderId = document.getElementById('inp-kader').value;
-  const umur    = document.getElementById('inp-umur').value;
+  const nama         = document.getElementById('inp-nama').value.trim();
+  const nik          = document.getElementById('inp-nik').value.trim();
+  const kaderId      = document.getElementById('inp-kader').value;
+  const tanggalLahir = document.getElementById('inp-tgl-lahir').value;
+  const jenisKelamin = document.getElementById('inp-jk').value;
 
   hideAlerts();
-  if (!nama || !nik || !kaderId || !umur) { showError('Semua field wajib diisi!'); return; }
-  if (nik.length !== 16 || isNaN(nik))   { showError('NIK harus 16 digit angka!'); return; }
-  if (parseInt(umur) < 17)               { showError('Umur minimal 17 tahun!'); return; }
+  if (!nama || !nik || !kaderId) { showError('Nama, NIK, dan Kader wajib diisi!'); return; }
+  if (nik.length !== 16 || isNaN(nik)) { showError('NIK harus 16 digit angka!'); return; }
 
-  // Kirim info duplikat jika ada
-  let duplikatInfo = null;
-  if (duplikatSaatIni.length > 0) {
-    duplikatInfo = JSON.stringify({
-      alasan   : duplikatSaatIni.map(d => `${d.reason}: ${d.pemilih.nama}`).join('; '),
-      idTerkait: duplikatSaatIni.map(d => d.pemilih.id),
-      level    : duplikatSaatIni[0].level
-    });
+  const res = await PemilihAPI.tambah({ nama, nik, kaderId, tanggalLahir, jenisKelamin });
+
+  if (res.error) {
+    showError(res.error);
+    return;
   }
 
-  const res = await PemilihAPI.tambah({ nama, nik, kaderId, umur, duplikatInfo });
-  if (res.error) { showError(res.error); return; }
-
-  const adaDup = !!duplikatInfo;
-  showSuccess(adaDup
-    ? `${nama} disimpan dengan tanda ⚠️ duplikat. Cek di dashboard.`
-    : `${nama} berhasil didaftarkan!`
-  );
+  showSuccess(`${nama} berhasil didaftarkan!`);
   resetFormPemilih();
-  showToast(adaDup ? `⚠️ ${nama} disimpan (terindikasi duplikat)` : `✅ ${nama} berhasil disimpan!`);
+  showToast(`✅ ${nama} berhasil disimpan!`);
   setTimeout(() => { window.location.href = '/'; }, 1800);
 }
 
 // ── Submit EDIT ───────────────────────────────────────
 async function submitEditPemilih() {
-  const id      = document.getElementById('edit-id').value;
-  const nama    = document.getElementById('inp-nama').value.trim();
-  const nik     = document.getElementById('inp-nik').value.trim();
-  const kaderId = document.getElementById('inp-kader').value;
-  const umur    = document.getElementById('inp-umur').value;
+  const id           = document.getElementById('edit-id').value;
+  const nama         = document.getElementById('inp-nama').value.trim();
+  const nik          = document.getElementById('inp-nik').value.trim();
+  const kaderId      = document.getElementById('inp-kader').value;
+  const tanggalLahir = document.getElementById('inp-tgl-lahir').value;
+  const jenisKelamin = document.getElementById('inp-jk').value;
 
   hideAlerts();
-  if (!nama || !nik || !kaderId || !umur) { showError('Semua field wajib diisi!'); return; }
-  if (nik.length !== 16 || isNaN(nik))   { showError('NIK harus 16 digit angka!'); return; }
+  if (!nama || !nik || !kaderId) { showError('Semua field wajib diisi!'); return; }
+  if (nik.length !== 16 || isNaN(nik)) { showError('NIK harus 16 digit angka!'); return; }
 
-  const res = await PemilihAPI.edit(id, { nama, nik, kaderId, umur });
+  const res = await PemilihAPI.edit(id, { nama, nik, kaderId, tanggalLahir, jenisKelamin });
   if (res.error) { showError(res.error); return; }
 
   showSuccess('Data berhasil diperbarui!');
@@ -80,14 +132,18 @@ async function submitEditPemilih() {
 
 // ── Helpers ───────────────────────────────────────────
 function resetFormPemilih() {
-  ['inp-nama','inp-nik','inp-umur'].forEach(id => {
+  ['inp-nama','inp-nik','inp-tgl-lahir'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.value = '';
   });
   const sel = document.getElementById('inp-kader');
   if (sel) sel.value = '';
-  document.getElementById('alert-dup')?.classList.remove('show');
-  duplikatSaatIni = [];
+  const jk = document.getElementById('inp-jk');
+  if (jk) jk.value = '';
+  const umur = document.getElementById('display-umur');
+  if (umur) umur.textContent = '';
+  const nikStatus = document.getElementById('nik-status');
+  if (nikStatus) { nikStatus.className = 'nik-status'; nikStatus.textContent = ''; }
 }
 
 function showError(msg) {

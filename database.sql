@@ -1,65 +1,54 @@
 -- ════════════════════════════════════════════════════
---  PENDATAAN PEMILIH — Setup Database MySQL
---  Jalankan file ini sekali sebelum menjalankan server
+--  PENDATAAN PEMILIH — Setup Database MySQL (v2)
+--  Jalankan file ini sekali untuk fresh install
 -- ════════════════════════════════════════════════════
 
 -- 1. Buat database (jika belum ada)
-CREATE DATABASE IF NOT EXISTS pendataan_pemilih
-  CHARACTER SET utf8mb4
-  COLLATE utf8mb4_unicode_ci;
+CREATE DATABASE IF NOT EXISTS pendataan_pemilih CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 USE pendataan_pemilih;
 
 -- ── Tabel Kader ──────────────────────────────────────
 CREATE TABLE IF NOT EXISTS kader (
-  id          VARCHAR(20)   PRIMARY KEY,
-  nama        VARCHAR(100)  NOT NULL,
-  nomor       INT           NOT NULL,
-  created_at  DATETIME      DEFAULT NOW(),
-
-  UNIQUE KEY uq_kader_nomor (nomor)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    id VARCHAR(20) PRIMARY KEY,
+    nama VARCHAR(100) NOT NULL,
+    nomor INT NOT NULL,
+    target_suara INT NOT NULL DEFAULT 0,
+    created_at DATETIME DEFAULT NOW(),
+    UNIQUE KEY uq_kader_nomor (nomor)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
 
 -- ── Tabel Pemilih ────────────────────────────────────
 CREATE TABLE IF NOT EXISTS pemilih (
-  id              VARCHAR(20)   PRIMARY KEY,
-  nama            VARCHAR(100)  NOT NULL,
-  nik             CHAR(16)      NOT NULL,
-  kader_id        VARCHAR(20)   NOT NULL,
-  umur            TINYINT       NOT NULL,
+    id VARCHAR(20) PRIMARY KEY,
+    nama VARCHAR(100) NOT NULL,
+    nik CHAR(16) NOT NULL,
+    tanggal_lahir DATE DEFAULT NULL,
+    jenis_kelamin ENUM('L','P') DEFAULT NULL,
+    kader_id VARCHAR(20) NOT NULL,
+    created_at DATETIME DEFAULT NOW(),
+    -- NIK unik (tidak boleh ada 2 NIK sama persis)
+    UNIQUE KEY uq_pemilih_nik (nik),
+    -- FULLTEXT untuk pencarian nama cepat
+    FULLTEXT KEY ft_pemilih_nama (nama),
+    KEY idx_pemilih_kader (kader_id),
+    CONSTRAINT fk_pemilih_kader FOREIGN KEY (kader_id) REFERENCES kader (id) ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
 
-  -- Kolom duplikat: 0 = aman, 1 = terindikasi duplikat
-  is_duplikat     TINYINT(1)    DEFAULT 0,
-  -- Keterangan duplikat: NIK identik / nama mirip / dll
-  duplikat_info   VARCHAR(255)  DEFAULT NULL,
+-- ── Tabel Log Duplikat (Audit Kecurangan) ────────────
+CREATE TABLE IF NOT EXISTS log_duplikat (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    nik_target CHAR(16) NOT NULL,
+    nama_input VARCHAR(100) NOT NULL,
+    kader_id_pelaku VARCHAR(20) NOT NULL,
+    kader_id_existing VARCHAR(20) DEFAULT NULL,
+    nama_existing VARCHAR(100) DEFAULT NULL,
+    created_at DATETIME DEFAULT NOW(),
+    KEY idx_log_nik (nik_target),
+    KEY idx_log_kader (kader_id_pelaku),
+    KEY idx_log_created (created_at)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
 
-  created_at      DATETIME      DEFAULT NOW(),
-
-  -- NIK tetap unik (tidak boleh ada 2 NIK sama persis)
-  UNIQUE KEY uq_pemilih_nik (nik),
-
-  -- FULLTEXT untuk pencarian nama cepat di data ribuan
-  FULLTEXT KEY ft_pemilih_nama (nama),
-
-  -- Index untuk filter duplikat di dashboard
-  KEY idx_pemilih_duplikat (is_duplikat),
-  KEY idx_pemilih_kader    (kader_id),
-
-  CONSTRAINT fk_pemilih_kader
-    FOREIGN KEY (kader_id) REFERENCES kader(id)
-    ON UPDATE CASCADE
-    ON DELETE RESTRICT
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
--- ════════════════════════════════════════════════════
---  Jika tabel sudah ada sebelumnya, jalankan ALTER ini
---  untuk menambah kolom duplikat:
---
---  ALTER TABLE pemilih
---    ADD COLUMN is_duplikat   TINYINT(1)   DEFAULT 0    AFTER umur,
---    ADD COLUMN duplikat_info VARCHAR(255) DEFAULT NULL AFTER is_duplikat,
---    ADD KEY idx_pemilih_duplikat (is_duplikat);
---
 -- ════════════════════════════════════════════════════
 --  Selesai! Jalankan: node server.js
 -- ════════════════════════════════════════════════════

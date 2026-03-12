@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Log Duplikat — Pendataan</title>
+  <link rel="stylesheet" href="/css/style.css"/>
+</head>
+<body>
+
+<header>
+  <div class="container header-inner">
+    <a href="/" class="logo">
+      <div class="logo-icon">🗳️</div>
+      <div class="logo-text">Data<span>Pilih</span></div>
+    </a>
+    <nav class="nav">
+      <a href="/">📊 Dashboard</a>
+      <a href="/tambah-pemilih">➕ Tambah</a>
+      <a href="/import">📥 Import</a>
+      <a href="/kader">🎖️ Kader</a>
+      <a href="/log-duplikat" class="active">🔍 Log</a>
+    </nav>
+  </div>
+</header>
+
+<div class="container">
+  <div class="page-header">
+    <div class="breadcrumb"><a href="/">Dashboard</a> › <span>Log Duplikat</span></div>
+    <h1>🔍 Log Percobaan Duplikat</h1>
+    <p>Audit trail semua percobaan memasukkan NIK yang sudah terdaftar. Data ini tidak bisa dihapus.</p>
+  </div>
+
+  <!-- Statistik -->
+  <div class="grid-2" style="margin-bottom:20px;">
+    <div class="stat-card dup-card">
+      <div class="sc-label">⚠️ Total Percobaan Duplikat</div>
+      <div class="sc-value" style="color:var(--danger);" id="stat-total">…</div>
+      <div class="sc-sub">percobaan tercatat</div>
+    </div>
+    <div class="card" style="padding:20px;">
+      <div class="card-title" style="margin-bottom:10px;"><div class="card-icon ci-red">🏷️</div> Per Kader (Pelaku)</div>
+      <div id="per-kader-list" style="font-size:13px;color:var(--text2);">
+        <div class="loading"><span class="spinner"></span>Memuat…</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tabel Log -->
+  <div class="card" style="margin-bottom:32px;">
+    <div class="card-title"><div class="card-icon ci-red">📋</div> Detail Log Duplikat</div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>NIK Target</th>
+            <th>Nama Diinput</th>
+            <th>Kader Pelaku</th>
+            <th>Pemilik NIK Asli</th>
+            <th>Kader Pemilik</th>
+            <th>Waktu</th>
+          </tr>
+        </thead>
+        <tbody id="tbody-log">
+          <tr><td colspan="7"><div class="loading"><span class="spinner"></span>Memuat…</div></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Pagination -->
+    <div class="pagination">
+      <div class="page-info" id="page-info">Memuat…</div>
+      <div class="page-btns" id="page-btns"></div>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+  function formatDate(ts) {
+    if (!ts) return '-';
+    return new Date(ts).toLocaleString('id-ID', {
+      day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit'
+    });
+  }
+  function showToast(msg, emoji='✅') {
+    const t = document.getElementById('toast');
+    t.innerHTML = `${emoji} ${msg}`;
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 3000);
+  }
+
+  let currentPage = 1;
+  const limit = 50;
+  let totalPages = 1;
+  let totalData = 0;
+
+  function goToPage(p) {
+    if (p < 1 || p > totalPages) return;
+    currentPage = p;
+    loadLog();
+  }
+
+  async function loadLog() {
+    document.getElementById('tbody-log').innerHTML =
+      '<tr><td colspan="7"><div class="loading"><span class="spinner"></span>Memuat…</div></td></tr>';
+
+    const res = await fetch(`/api/log-duplikat?page=${currentPage}&limit=${limit}`).then(r => r.json());
+    const data = res.data || [];
+    totalPages = res.totalPages || 1;
+    totalData  = res.total || 0;
+    const startNo = (currentPage - 1) * limit;
+
+    const tbody = document.getElementById('tbody-log');
+    if (!data.length) {
+      tbody.innerHTML = `<tr><td colspan="7">
+        <div class="empty"><div class="empty-icon">✅</div>
+        <p>Tidak ada percobaan duplikat. Semua bersih!</p></div>
+      </td></tr>`;
+    } else {
+      tbody.innerHTML = data.map((d, i) => `
+        <tr class="row-dup">
+          <td style="color:var(--text3);font-size:12px;">${startNo+i+1}</td>
+          <td><span class="nik">${d.nik_target}</span></td>
+          <td style="font-weight:600;color:var(--text);">${d.nama_input}</td>
+          <td><span class="badge badge-red">${d.kaderPelaku || '-'}</span></td>
+          <td style="color:var(--text2);">${d.nama_existing || '-'}</td>
+          <td><span class="badge badge-blue">${d.kaderExisting || '-'}</span></td>
+          <td style="font-size:12px;color:var(--text3);">${formatDate(d.created_at)}</td>
+        </tr>
+      `).join('');
+    }
+
+    // Pagination
+    const start = totalData ? startNo + 1 : 0;
+    const end   = Math.min(currentPage * limit, totalData);
+    document.getElementById('page-info').textContent =
+      totalData ? `Menampilkan ${start}–${end} dari ${totalData}` : 'Tidak ada data';
+
+    const wrap = document.getElementById('page-btns');
+    if (totalPages <= 1) { wrap.innerHTML = ''; return; }
+    let btns = `<button class="page-btn" onclick="goToPage(${currentPage-1})" ${currentPage===1?'disabled':''}>←</button>`;
+    for (let p = Math.max(1, currentPage-2); p <= Math.min(totalPages, currentPage+2); p++)
+      btns += `<button class="page-btn ${p===currentPage?'active':''}" onclick="goToPage(${p})">${p}</button>`;
+    btns += `<button class="page-btn" onclick="goToPage(${currentPage+1})" ${currentPage===totalPages?'disabled':''}>→</button>`;
+    wrap.innerHTML = btns;
+  }
+
+  async function loadStats() {
+    const res = await fetch('/api/log-duplikat/statistik').then(r => r.json());
+    document.getElementById('stat-total').textContent = res.total || 0;
+
+    const list = document.getElementById('per-kader-list');
+    if (!res.perKader || res.perKader.length === 0) {
+      list.innerHTML = '<p style="color:var(--text3);">Tidak ada data.</p>';
+    } else {
+      list.innerHTML = res.perKader.map(k => `
+        <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);">
+          <span style="font-weight:600;">${k.kader}</span>
+          <span class="badge badge-red">${k.jumlah} percobaan</span>
+        </div>
+      `).join('');
+    }
+  }
+
+  loadStats();
+  loadLog();
+</script>
+</body>
+</html>

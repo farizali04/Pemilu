@@ -1,13 +1,16 @@
 // ════════════════════════════════════════
-//  server.js — Express + MySQL
+//  server.js — Express + MySQL (v2)
 // ════════════════════════════════════════
 require('dotenv').config();
 const express = require('express');
 const path    = require('path');
+const multer  = require('multer');
+const XLSX    = require('xlsx');
 const { query, testConnection } = require('./db');
 
-const app  = express();
-const PORT = process.env.PORT || 3000;
+const app    = express();
+const PORT   = process.env.PORT || 3000;
+const upload = multer({ dest: 'uploads/', limits: { fileSize: 10 * 1024 * 1024 } }); // max 10MB
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
@@ -16,15 +19,39 @@ function genId() {
   return Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
 }
 
-function similarityScore(a, b) {
-  a = a.toLowerCase().replace(/\s+/g, ' ').trim();
-  b = b.toLowerCase().replace(/\s+/g, ' ').trim();
-  if (a === b) return 1;
-  if (a.includes(b) || b.includes(a)) return 0.85;
-  const wa = a.split(' '), wb = b.split(' ');
-  const common = wa.filter(w => wb.includes(w) && w.length > 2);
-  if (common.length > 0) return 0.6 + (common.length / Math.max(wa.length, wb.length)) * 0.3;
-  return 0;
+// ── Helper: hitung umur dari tanggal lahir ──────────
+function hitungUmur(tanggalLahir) {
+  if (!tanggalLahir) return null;
+  const lahir = new Date(tanggalLahir);
+  const now   = new Date();
+  let umur    = now.getFullYear() - lahir.getFullYear();
+  const m     = now.getMonth() - lahir.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < lahir.getDate())) umur--;
+  return umur;
+}
+
+// ── Helper: parse NIK → tanggal lahir & jenis kelamin ──
+function parseNIK(nik) {
+  if (!nik || nik.length !== 16) return null;
+  let tanggal = parseInt(nik.substring(6, 8));
+  const bulan = parseInt(nik.substring(8, 10));
+  let tahun   = parseInt(nik.substring(10, 12));
+
+  let jenisKelamin = 'L';
+  if (tanggal > 40) {
+    jenisKelamin = 'P';
+    tanggal -= 40;
+  }
+
+  // Tentukan abad: jika tahun >= 0 dan <= 12 (tahun kecil) → 2000-an, sisanya 1900-an
+  const currentYear2Digit = new Date().getFullYear() % 100;
+  tahun = tahun <= currentYear2Digit ? 2000 + tahun : 1900 + tahun;
+
+  // Validasi
+  if (bulan < 1 || bulan > 12 || tanggal < 1 || tanggal > 31) return null;
+
+  const tgl = `${tahun}-${String(bulan).padStart(2, '0')}-${String(tanggal).padStart(2, '0')}`;
+  return { tanggalLahir: tgl, jenisKelamin };
 }
 
 // ══════ API KADER ══════════════════════════════════════
@@ -50,12 +77,13 @@ app.get('/api/kader/:id', async (req, res) => {
 
 app.post('/api/kader', async (req, res) => {
   try {
-    const { nama, nomor } = req.body;
+    const { nama, nomor, targetSuara } = req.body;
     if (!nama || !nomor) return res.status(400).json({ error: 'Nama dan nomor wajib diisi' });
     const dup = await query('SELECT id FROM kader WHERE nomor = ?', [parseInt(nomor)]);
     if (dup.length) return res.status(400).json({ error: `Kader ${nomor} sudah terdaftar` });
     const id = genId();
-    await query('INSERT INTO kader (id, nama, nomor) VALUES (?, ?, ?)', [id, nama.trim(), parseInt(nomor)]);
+    await query('INSERT INTO kader (id, nama, nomor, target_suara) VALUES (?, ?, ?, ?)',
+      [id, nama.trim(), parseInt(nomor), parseInt(targetSuara) || 0]);
     const [kader] = await query('SELECT * FROM kader WHERE id = ?', [id]);
     res.status(201).json(kader);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -63,10 +91,11 @@ app.post('/api/kader', async (req, res) => {
 
 app.put('/api/kader/:id', async (req, res) => {
   try {
-    const { nama, nomor } = req.body;
+    const { nama, nomor, targetSuara } = req.body;
     const dup = await query('SELECT id FROM kader WHERE nomor = ? AND id != ?', [parseInt(nomor), req.params.id]);
     if (dup.length) return res.status(400).json({ error: `Nomor kader ${nomor} sudah dipakai` });
-    await query('UPDATE kader SET nama = ?, nomor = ? WHERE id = ?', [nama.trim(), parseInt(nomor), req.params.id]);
+    await query('UPDATE kader SET nama = ?, nomor = ?, target_suara = ? WHERE id = ?',
+      [nama.trim(), parseInt(nomor), parseInt(targetSuara) || 0, req.params.id]);
     const [kader] = await query('SELECT * FROM kader WHERE id = ?', [req.params.id]);
     res.json(kader);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -85,32 +114,67 @@ app.delete('/api/kader/:id', async (req, res) => {
 
 app.get('/api/pemilih', async (req, res) => {
   try {
-    const { q, kaderId, duplikat } = req.query;
-    let sql = `
-      SELECT p.*, CONCAT('Kader ', k.nomor, ' — ', k.nama) AS namaKader
-      FROM pemilih p JOIN kader k ON k.id = p.kader_id WHERE 1=1
-    `;
+    const { q, kaderId, page, limit } = req.query;
+    const pg  = Math.max(1, parseInt(page) || 1);
+    const lim = Math.min(200, Math.max(1, parseInt(limit) || 50));
+    const offset = (pg - 1) * lim;
+
+    let where  = ' WHERE 1=1';
     const params = [];
-    if (kaderId)          { sql += ' AND p.kader_id = ?';              params.push(kaderId); }
-    if (q)                { sql += ' AND (p.nama LIKE ? OR p.nik LIKE ?)'; params.push(`%${q}%`, `%${q}%`); }
-    if (duplikat === '1') { sql += ' AND p.is_duplikat = 1'; }
-    sql += ' ORDER BY k.nomor ASC, p.created_at ASC';
-    res.json(await query(sql, params));
+
+    if (kaderId)  { where += ' AND p.kader_id = ?';                params.push(kaderId); }
+    if (q)        { where += ' AND (p.nama LIKE ? OR p.nik LIKE ?)'; params.push(`%${q}%`, `%${q}%`); }
+
+    // Count total
+    const [countRow] = await query(
+      `SELECT COUNT(*) AS total FROM pemilih p JOIN kader k ON k.id = p.kader_id ${where}`, params
+    );
+    const total = countRow.total;
+
+    // Data with pagination
+    const data = await query(`
+      SELECT p.*, CONCAT('Kader ', k.nomor, ' — ', k.nama) AS namaKader,
+             TIMESTAMPDIFF(YEAR, p.tanggal_lahir, CURDATE()) AS umur
+      FROM pemilih p JOIN kader k ON k.id = p.kader_id
+      ${where}
+      ORDER BY k.nomor ASC, p.created_at DESC
+      LIMIT ? OFFSET ?
+    `, [...params, lim, offset]);
+
+    res.json({
+      data,
+      total,
+      page: pg,
+      limit: lim,
+      totalPages: Math.ceil(total / lim) || 1
+    });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.get('/api/pemilih/statistik', async (req, res) => {
   try {
-    const [total]    = await query('SELECT COUNT(*) AS n FROM pemilih');
-    const [duplikat] = await query('SELECT COUNT(*) AS n FROM pemilih WHERE is_duplikat = 1');
-    res.json({ total: total.n, duplikat: duplikat.n, aman: total.n - duplikat.n });
+    const [total]   = await query('SELECT COUNT(*) AS n FROM pemilih');
+    const [logDup]  = await query('SELECT COUNT(*) AS n FROM log_duplikat');
+    res.json({ total: total.n, percobaanDuplikat: logDup.n });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Cek NIK real-time (ringan, hanya cek ada/tidak)
+app.get('/api/pemilih/cek-nik/:nik', async (req, res) => {
+  try {
+    const rows = await query(`
+      SELECT p.nama, p.nik, CONCAT('Kader ', k.nomor, ' — ', k.nama) AS namaKader
+      FROM pemilih p JOIN kader k ON k.id = p.kader_id WHERE p.nik = ?
+    `, [req.params.nik]);
+    res.json({ exists: rows.length > 0, data: rows[0] || null });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.get('/api/pemilih/:id', async (req, res) => {
   try {
     const rows = await query(`
-      SELECT p.*, CONCAT('Kader ', k.nomor, ' — ', k.nama) AS namaKader
+      SELECT p.*, CONCAT('Kader ', k.nomor, ' — ', k.nama) AS namaKader,
+             TIMESTAMPDIFF(YEAR, p.tanggal_lahir, CURDATE()) AS umur
       FROM pemilih p JOIN kader k ON k.id = p.kader_id WHERE p.id = ?
     `, [req.params.id]);
     if (!rows.length) return res.status(404).json({ error: 'Pemilih tidak ditemukan' });
@@ -118,126 +182,79 @@ app.get('/api/pemilih/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/pemilih/cek-duplikat', async (req, res) => {
-  try {
-    const { nama, nik } = req.body;
-    const dups = [];
-
-    // Cek NIK identik
-    if (nik && nik.length >= 4) {
-      const rows = await query(`
-        SELECT p.*, CONCAT('Kader ', k.nomor, ' — ', k.nama) AS namaKader
-        FROM pemilih p JOIN kader k ON k.id = p.kader_id WHERE p.nik = ?
-      `, [nik]);
-      rows.forEach(p => dups.push({ pemilih: p, reason: 'NIK identik', level: 'merah' }));
-    }
-
-    // Cek nama mirip dengan FULLTEXT
-    if (nama && nama.length >= 3) {
-      const words = nama.trim().split(/\s+/).filter(w => w.length > 2).join(' ');
-      let kandidat = [];
-      if (words) {
-        kandidat = await query(`
-          SELECT p.*, CONCAT('Kader ', k.nomor, ' — ', k.nama) AS namaKader
-          FROM pemilih p JOIN kader k ON k.id = p.kader_id
-          WHERE MATCH(p.nama) AGAINST(? IN BOOLEAN MODE) LIMIT 50
-        `, [words + '*']);
-      }
-      if (!kandidat.length) {
-        kandidat = await query(`
-          SELECT p.*, CONCAT('Kader ', k.nomor, ' — ', k.nama) AS namaKader
-          FROM pemilih p JOIN kader k ON k.id = p.kader_id
-          WHERE p.nama LIKE ? LIMIT 50
-        `, [`%${nama.trim().split(' ')[0]}%`]);
-      }
-      kandidat.forEach(p => {
-        if (dups.find(d => d.pemilih.id === p.id)) return;
-        const score = similarityScore(nama, p.nama);
-        if (score >= 0.85) dups.push({ pemilih: p, reason: 'Nama hampir sama', level: score === 1 ? 'merah' : 'kuning' });
-        else if (score >= 0.6) dups.push({ pemilih: p, reason: 'Nama memiliki kesamaan kata', level: 'oranye' });
-      });
-    }
-    res.json(dups);
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
 app.post('/api/pemilih', async (req, res) => {
   try {
-    const { nama, nik, kaderId, umur, duplikatInfo } = req.body;
-    if (!nama || !nik || !kaderId || !umur) return res.status(400).json({ error: 'Semua field wajib diisi' });
+    const { nama, nik, kaderId, tanggalLahir, jenisKelamin } = req.body;
+    if (!nama || !nik || !kaderId) return res.status(400).json({ error: 'Nama, NIK, dan Kader wajib diisi' });
     if (nik.length !== 16 || isNaN(nik)) return res.status(400).json({ error: 'NIK harus 16 digit angka' });
-    if (parseInt(umur) < 17) return res.status(400).json({ error: 'Umur minimal 17 tahun' });
 
-    const kaderAda = await query('SELECT id FROM kader WHERE id = ?', [kaderId]);
+    // Validasi tanggal lahir → umur minimal 17
+    if (tanggalLahir) {
+      const umur = hitungUmur(tanggalLahir);
+      if (umur !== null && umur < 17) return res.status(400).json({ error: 'Umur minimal 17 tahun (berdasarkan tanggal lahir)' });
+    }
+
+    const kaderAda = await query('SELECT id, nama, nomor FROM kader WHERE id = ?', [kaderId]);
     if (!kaderAda.length) return res.status(400).json({ error: 'Kader tidak ditemukan' });
 
-    // Cek apakah NIK sudah ada (duplikat keras — NIK benar-benar sama)
-    const nikDup = await query('SELECT id, nama FROM pemilih WHERE nik = ?', [nik]);
+    // ═══ CEK NIK DUPLIKAT — TOLAK KERAS ═══
+    const nikDup = await query(`
+      SELECT p.id, p.nama, p.kader_id, CONCAT('Kader ', k.nomor, ' — ', k.nama) AS namaKader
+      FROM pemilih p JOIN kader k ON k.id = p.kader_id WHERE p.nik = ?
+    `, [nik]);
+
     if (nikDup.length) {
-      // NIK sama persis = tolak, karena 1 NIK hanya boleh 1 orang
-      return res.status(400).json({ error: `NIK sudah terdaftar atas nama ${nikDup[0].nama}` });
+      // Catat percobaan duplikat di log
+      await query(
+        `INSERT INTO log_duplikat (nik_target, nama_input, kader_id_pelaku, kader_id_existing, nama_existing)
+         VALUES (?, ?, ?, ?, ?)`,
+        [nik, nama.trim(), kaderId, nikDup[0].kader_id, nikDup[0].nama]
+      );
+
+      return res.status(409).json({
+        error: `DITOLAK: NIK ${nik} sudah terdaftar pada ${nikDup[0].namaKader} atas nama "${nikDup[0].nama}".`,
+        existing: nikDup[0]
+      });
     }
 
-    // Tentukan flag duplikat berdasarkan info dari frontend
-    const isDuplikat  = duplikatInfo ? 1 : 0;
-    const infoSimpan  = duplikatInfo || null;
-
+    // ═══ INSERT DATA BARU ═══
     const id = genId();
     await query(
-      'INSERT INTO pemilih (id, nama, nik, kader_id, umur, is_duplikat, duplikat_info) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [id, nama.trim(), nik, kaderId, parseInt(umur), isDuplikat, infoSimpan]
+      'INSERT INTO pemilih (id, nama, nik, tanggal_lahir, jenis_kelamin, kader_id) VALUES (?, ?, ?, ?, ?, ?)',
+      [id, nama.trim(), nik, tanggalLahir || null, jenisKelamin || null, kaderId]
     );
 
-    // Tandai juga data LAMA yang mirip sebagai duplikat (jika belum ditandai)
-    if (isDuplikat && infoSimpan) {
-      // Ambil ID data lama yang terlibat dari duplikatInfo
-      try {
-        const infoObj = JSON.parse(infoSimpan);
-        if (infoObj.idTerkait && infoObj.idTerkait.length) {
-          for (const idLama of infoObj.idTerkait) {
-            await query(
-              `UPDATE pemilih SET is_duplikat = 1,
-               duplikat_info = JSON_SET(COALESCE(duplikat_info, '{}'), '$.tandaiOleh', ?)
-               WHERE id = ? AND is_duplikat = 0`,
-              [id, idLama]
-            );
-          }
-        }
-      } catch (_) { /* abaikan jika parse gagal */ }
-    }
-
     const [p] = await query(`
-      SELECT p.*, CONCAT('Kader ', k.nomor, ' — ', k.nama) AS namaKader
+      SELECT p.*, CONCAT('Kader ', k.nomor, ' — ', k.nama) AS namaKader,
+             TIMESTAMPDIFF(YEAR, p.tanggal_lahir, CURDATE()) AS umur
       FROM pemilih p JOIN kader k ON k.id = p.kader_id WHERE p.id = ?
     `, [id]);
     res.status(201).json(p);
   } catch (e) {
-    if (e.code === 'ER_DUP_ENTRY') return res.status(400).json({ error: 'NIK sudah terdaftar' });
+    if (e.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'NIK sudah terdaftar (constraint)' });
     res.status(500).json({ error: e.message });
   }
 });
 
-// PUT tandai/hapus status duplikat manual
-app.put('/api/pemilih/:id/duplikat', async (req, res) => {
-  try {
-    const { isDuplikat, info } = req.body;
-    await query(
-      'UPDATE pemilih SET is_duplikat = ?, duplikat_info = ? WHERE id = ?',
-      [isDuplikat ? 1 : 0, info || null, req.params.id]
-    );
-    res.json({ success: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
 app.put('/api/pemilih/:id', async (req, res) => {
   try {
-    const { nama, nik, kaderId, umur } = req.body;
-    const nikDup = await query('SELECT nama FROM pemilih WHERE nik = ? AND id != ?', [nik, req.params.id]);
-    if (nikDup.length) return res.status(400).json({ error: `NIK sudah dipakai oleh ${nikDup[0].nama}` });
-    await query('UPDATE pemilih SET nama = ?, nik = ?, kader_id = ?, umur = ? WHERE id = ?',
-      [nama.trim(), nik, kaderId, parseInt(umur), req.params.id]);
+    const { nama, nik, kaderId, tanggalLahir, jenisKelamin } = req.body;
+    if (!nama || !nik || !kaderId) return res.status(400).json({ error: 'Semua field wajib diisi' });
+    if (nik.length !== 16 || isNaN(nik)) return res.status(400).json({ error: 'NIK harus 16 digit angka' });
+
+    const nikDup = await query(`
+      SELECT p.nama, CONCAT('Kader ', k.nomor, ' — ', k.nama) AS namaKader
+      FROM pemilih p JOIN kader k ON k.id = p.kader_id WHERE p.nik = ? AND p.id != ?
+    `, [nik, req.params.id]);
+    if (nikDup.length) return res.status(400).json({ error: `NIK sudah dipakai oleh ${nikDup[0].nama} (${nikDup[0].namaKader})` });
+
+    await query(
+      'UPDATE pemilih SET nama = ?, nik = ?, kader_id = ?, tanggal_lahir = ?, jenis_kelamin = ? WHERE id = ?',
+      [nama.trim(), nik, kaderId, tanggalLahir || null, jenisKelamin || null, req.params.id]
+    );
     const [p] = await query(`
-      SELECT p.*, CONCAT('Kader ', k.nomor, ' — ', k.nama) AS namaKader
+      SELECT p.*, CONCAT('Kader ', k.nomor, ' — ', k.nama) AS namaKader,
+             TIMESTAMPDIFF(YEAR, p.tanggal_lahir, CURDATE()) AS umur
       FROM pemilih p JOIN kader k ON k.id = p.kader_id WHERE p.id = ?
     `, [req.params.id]);
     res.json(p);
@@ -251,6 +268,126 @@ app.delete('/api/pemilih/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ══════ IMPORT EXCEL ═══════════════════════════════════
+
+app.post('/api/pemilih/import', upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'File tidak ditemukan' });
+    const kaderId = req.body.kaderId;
+    if (!kaderId) return res.status(400).json({ error: 'Kader tujuan wajib dipilih' });
+
+    const kaderAda = await query('SELECT id, nama, nomor FROM kader WHERE id = ?', [kaderId]);
+    if (!kaderAda.length) return res.status(400).json({ error: 'Kader tidak ditemukan' });
+
+    const workbook = XLSX.readFile(req.file.path);
+    const sheet    = workbook.Sheets[workbook.SheetNames[0]];
+    const rows     = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+
+    const hasil = { berhasil: 0, gagal: 0, detail: [] };
+
+    for (let i = 0; i < rows.length; i++) {
+      const row  = rows[i];
+      const nama = String(row.nama || row.Nama || row.NAMA || '').trim();
+      const nik  = String(row.nik || row.NIK || row.Nik || '').trim().replace(/\D/g, '');
+
+      if (!nama || !nik) {
+        hasil.gagal++;
+        hasil.detail.push({ baris: i + 2, nama, nik, status: 'gagal', alasan: 'Nama atau NIK kosong' });
+        continue;
+      }
+      if (nik.length !== 16) {
+        hasil.gagal++;
+        hasil.detail.push({ baris: i + 2, nama, nik, status: 'gagal', alasan: `NIK tidak 16 digit (${nik.length} digit)` });
+        continue;
+      }
+
+      // Parse NIK for tanggal lahir & jenis kelamin
+      const parsed = parseNIK(nik);
+      const tanggalLahir  = parsed ? parsed.tanggalLahir : null;
+      const jenisKelamin  = parsed ? parsed.jenisKelamin : null;
+
+      // Cek duplikat
+      const nikDup = await query('SELECT nama, kader_id FROM pemilih WHERE nik = ?', [nik]);
+      if (nikDup.length) {
+        // Log ke tabel kecurangan
+        await query(
+          `INSERT INTO log_duplikat (nik_target, nama_input, kader_id_pelaku, kader_id_existing, nama_existing)
+           VALUES (?, ?, ?, ?, ?)`,
+          [nik, nama, kaderId, nikDup[0].kader_id, nikDup[0].nama]
+        );
+        hasil.gagal++;
+        hasil.detail.push({ baris: i + 2, nama, nik, status: 'duplikat', alasan: `NIK sudah terdaftar atas nama "${nikDup[0].nama}"` });
+        continue;
+      }
+
+      // Insert
+      const id = genId();
+      await query(
+        'INSERT INTO pemilih (id, nama, nik, tanggal_lahir, jenis_kelamin, kader_id) VALUES (?, ?, ?, ?, ?, ?)',
+        [id, nama, nik, tanggalLahir, jenisKelamin, kaderId]
+      );
+      hasil.berhasil++;
+      hasil.detail.push({ baris: i + 2, nama, nik, status: 'berhasil', alasan: '' });
+    }
+
+    // Cleanup uploaded file
+    const fs = require('fs');
+    try { fs.unlinkSync(req.file.path); } catch (_) {}
+
+    res.json(hasil);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ══════ API LOG DUPLIKAT ═══════════════════════════════
+
+app.get('/api/log-duplikat', async (req, res) => {
+  try {
+    const { page, limit, kaderId } = req.query;
+    const pg  = Math.max(1, parseInt(page) || 1);
+    const lim = Math.min(200, Math.max(1, parseInt(limit) || 50));
+    const offset = (pg - 1) * lim;
+
+    let where  = '';
+    const params = [];
+    if (kaderId) { where = ' WHERE l.kader_id_pelaku = ?'; params.push(kaderId); }
+
+    const [countRow] = await query(
+      `SELECT COUNT(*) AS total FROM log_duplikat l${where}`, params
+    );
+
+    const data = await query(`
+      SELECT l.*,
+             CONCAT('Kader ', kp.nomor, ' — ', kp.nama) AS kaderPelaku,
+             CONCAT('Kader ', ke.nomor, ' — ', ke.nama) AS kaderExisting
+      FROM log_duplikat l
+      LEFT JOIN kader kp ON kp.id = l.kader_id_pelaku
+      LEFT JOIN kader ke ON ke.id = l.kader_id_existing
+      ${where}
+      ORDER BY l.created_at DESC
+      LIMIT ? OFFSET ?
+    `, [...params, lim, offset]);
+
+    res.json({
+      data,
+      total: countRow.total,
+      page: pg,
+      totalPages: Math.ceil(countRow.total / lim) || 1
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/log-duplikat/statistik', async (req, res) => {
+  try {
+    const [total] = await query('SELECT COUNT(*) AS n FROM log_duplikat');
+    const perKader = await query(`
+      SELECT CONCAT('Kader ', k.nomor, ' — ', k.nama) AS kader, COUNT(*) AS jumlah
+      FROM log_duplikat l JOIN kader k ON k.id = l.kader_id_pelaku
+      GROUP BY l.kader_id_pelaku ORDER BY jumlah DESC
+    `);
+    res.json({ total: total.n, perKader });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── HTML pages ────────────────────────────────────────
 app.get('/',               (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 app.get('/tambah-pemilih', (req, res) => res.sendFile(path.join(__dirname, 'public', 'tambah-pemilih.html')));
@@ -258,6 +395,8 @@ app.get('/tambah-kader',   (req, res) => res.sendFile(path.join(__dirname, 'publ
 app.get('/kader',          (req, res) => res.sendFile(path.join(__dirname, 'public', 'kader.html')));
 app.get('/edit-pemilih',   (req, res) => res.sendFile(path.join(__dirname, 'public', 'edit-pemilih.html')));
 app.get('/edit-kader',     (req, res) => res.sendFile(path.join(__dirname, 'public', 'edit-kader.html')));
+app.get('/import',         (req, res) => res.sendFile(path.join(__dirname, 'public', 'import.html')));
+app.get('/log-duplikat',   (req, res) => res.sendFile(path.join(__dirname, 'public', 'log-duplikat.html')));
 
 // ── Start ─────────────────────────────────────────────
 async function start() {
