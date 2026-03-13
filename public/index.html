@@ -236,7 +236,7 @@
   async function loadSemua() {
     const [kaders, statRes] = await Promise.all([
       KaderAPI.getAll(),
-      fetch('/api/pemilih/statistik').then(r => r.json())
+      fetchWithAuth('/api/pemilih/statistik').then(r => r.json())
     ]);
 
     document.getElementById('hdr-kader').textContent   = kaders.length;

@@ -67,18 +67,24 @@ document.addEventListener('DOMContentLoaded', () => {
     ? localStorage.getItem('namaKader') 
     : userRole; // Jika null (Superadmin), tampilkan role
 
+  const headerStats = document.querySelector('.header-stats');
   const headerNav = document.querySelector('.nav');
-  if (headerNav) {
+  if (headerStats || headerNav) {
     const userHtml = `
-      <div class="user-profile" style="display:flex;align-items:center;gap:12px;margin-left:20px;padding-left:20px;border-left:1px solid var(--border);">
-        <div style="text-align:right;">
-          <div style="font-size:13px;font-weight:700;color:var(--text);">${username}</div>
-          <div style="font-size:11px;color:var(--text3);">${namaKader}</div>
+      <div class="user-profile">
+        <div>
+          <div class="u-name">${username}</div>
+          <div class="u-role">${namaKader}</div>
         </div>
-        <button onclick="logout()" class="btn btn-outline btn-sm" style="padding:4px 8px;border-color:var(--danger);color:var(--danger);">Logout</button>
+        <button onclick="logout()" class="btn btn-outline btn-sm btn-danger" style="padding:4px 8px;">Logout</button>
       </div>
     `;
-    headerNav.insertAdjacentHTML('beforeend', userHtml);
+
+    if (headerStats) {
+      headerStats.insertAdjacentHTML('beforeend', userHtml);
+    } else {
+      headerNav.insertAdjacentHTML('beforeend', userHtml);
+    }
   }
 
   // Kosmetik RBAC: Sembunyikan elemen Superadmin jika role Kader
