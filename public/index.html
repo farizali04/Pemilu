@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Dashboard — Pendataan Pemilih</title>
   <link rel="stylesheet" href="/css/style.css"/>
+  <script src="/js/auth.js"></script>
 </head>
 <body>
 
@@ -194,7 +195,7 @@
           <td>
             <div class="gap-12">
               <a href="/edit-pemilih?id=${p.id}" class="btn btn-outline btn-xs">✏️</a>
-              <button class="btn btn-danger btn-xs" onclick="konfirmasiHapusPemilih('${p.id}','${p.nama}')">🗑️</button>
+              <button class="btn btn-danger btn-xs superadmin-only" onclick="konfirmasiHapusPemilih('${p.id}','${p.nama}')">🗑️</button>
             </div>
           </td>
         </tr>`;

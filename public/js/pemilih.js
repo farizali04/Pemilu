@@ -10,22 +10,22 @@ const PemilihAPI = {
     if (kaderId) params.set('kaderId', kaderId);
     params.set('page', page);
     params.set('limit', limit);
-    const res = await fetch(`/api/pemilih?${params}`);
+    const res = await fetchWithAuth(`/api/pemilih?${params}`);
     return res.json();
   },
 
   async getById(id) {
-    const res = await fetch(`/api/pemilih/${id}`);
+    const res = await fetchWithAuth(`/api/pemilih/${id}`);
     return res.json();
   },
 
   async cekNIK(nik) {
-    const res = await fetch(`/api/pemilih/cek-nik/${nik}`);
+    const res = await fetchWithAuth(`/api/pemilih/cek-nik/${nik}`);
     return res.json();
   },
 
   async tambah(data) {
-    const res = await fetch('/api/pemilih', {
+    const res = await fetchWithAuth('/api/pemilih', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
@@ -34,7 +34,7 @@ const PemilihAPI = {
   },
 
   async edit(id, data) {
-    const res = await fetch(`/api/pemilih/${id}`, {
+    const res = await fetchWithAuth(`/api/pemilih/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
@@ -43,12 +43,12 @@ const PemilihAPI = {
   },
 
   async hapus(id) {
-    const res = await fetch(`/api/pemilih/${id}`, { method: 'DELETE' });
+    const res = await fetchWithAuth(`/api/pemilih/${id}`, { method: 'DELETE' });
     return res.json();
   },
 
   async importExcel(formData) {
-    const res = await fetch('/api/pemilih/import', {
+    const res = await fetchWithAuth('/api/pemilih/import', {
       method: 'POST',
       body: formData
     });
