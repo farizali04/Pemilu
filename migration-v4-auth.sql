@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS users (
     id VARCHAR(20) NOT NULL PRIMARY KEY,
     username VARCHAR(50) NOT NULL UNIQUE,
     password_hash VARCHAR(255) NOT NULL,
-    role ENUM('Superadmin','Kader') NOT NULL DEFAULT 'Kader',
+    role ENUM('Superadmin','AdminKantor','Kader') NOT NULL DEFAULT 'Kader',
     id_kader VARCHAR(20) DEFAULT NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     KEY idx_users_kader (id_kader),

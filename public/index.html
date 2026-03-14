@@ -77,11 +77,17 @@
       </div>
     </div>
 
-    <!-- Search -->
+    <!-- Search + Filter -->
     <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;align-items:center;">
       <div class="search-wrap" style="flex:1;min-width:220px;">
         <span class="search-icon">🔍</span>
         <input type="text" id="inp-search" placeholder="Cari nama atau NIK…" oninput="onSearch(this.value)"/>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <label for="sel-kader" style="font-size:13px;color:var(--text3);font-weight:600;">Filter Kader:</label>
+        <select id="sel-kader" style="padding:8px 10px;border-radius: var(--radius-sm);border:1px solid var(--border2);background:#fff;" onchange="onKaderFilterChange(this.value)">
+          <option value="">Semua Kader</option>
+        </select>
       </div>
     </div>
 
@@ -141,17 +147,24 @@
     setTimeout(() => t.classList.remove('show'), 3000);
   }
 
-  let searchQuery  = '';
-  let currentPage  = 1;
-  let currentLimit = 50;
-  let totalPages   = 1;
-  let totalData    = 0;
+  let searchQuery     = '';
+  let selectedKaderId = '';
+  let currentPage     = 1;
+  let currentLimit    = 50;
+  let totalPages      = 1;
+  let totalData       = 0;
 
   let searchTimer = null;
   function onSearch(q) {
     searchQuery = q; currentPage = 1;
     clearTimeout(searchTimer);
     searchTimer = setTimeout(loadTabel, 350);
+  }
+
+  function onKaderFilterChange(kaderId) {
+    selectedKaderId = kaderId;
+    currentPage = 1;
+    loadTabel();
   }
 
   function onLimitChange(v) { currentLimit = parseInt(v); currentPage = 1; loadTabel(); }
@@ -168,7 +181,7 @@
     document.getElementById('tbody-pemilih').innerHTML =
       `<tr><td colspan="9"><div class="loading"><span class="spinner"></span>Memuat…</div></td></tr>`;
 
-    const result = await PemilihAPI.getAll(searchQuery, '', currentPage, currentLimit);
+    const result = await PemilihAPI.getAll(searchQuery, selectedKaderId, currentPage, currentLimit);
     const data   = result.data || [];
     totalPages   = result.totalPages || 1;
     totalData    = result.total || 0;
@@ -238,6 +251,14 @@
       KaderAPI.getAll(),
       fetchWithAuth('/api/pemilih/statistik').then(r => r.json())
     ]);
+
+    // Isi dropdown filter Kader
+    const sel = document.getElementById('sel-kader');
+    if (sel) {
+      sel.innerHTML = '<option value="">Semua Kader</option>' +
+        kaders.map(k => `<option value="${k.id}">Kader ${k.nomor} — ${k.nama}</option>`).join('');
+      sel.value = selectedKaderId;
+    }
 
     document.getElementById('hdr-kader').textContent   = kaders.length;
     document.getElementById('hdr-pemilih').textContent  = statRes.total || 0;

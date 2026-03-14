@@ -15,6 +15,15 @@ const PORT   = process.env.PORT || 3000;
 const upload = multer({ dest: 'uploads/', limits: { fileSize: 10 * 1024 * 1024 } });
 
 app.use(express.json());
+
+// Prevent browser caching for protected pages (helps logout + back button behavior)
+app.use((req, res, next) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
+  next();
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 function genId() {
@@ -292,7 +301,7 @@ app.post('/api/pemilih', verifyToken, async (req, res) => {
   try {
     const { nama, nik, kaderId, tanggalLahir, jenisKelamin } = req.body;
     if (!nama || !nik || !kaderId) return res.status(400).json({ error: 'Nama, NIK, dan Kader wajib diisi' });
-    if (nik.length !== 16 || isNaN(nik)) return res.status(400).json({ error: 'NIK harus 16 digit angka' });
+    if (!/^\d{16}$/.test(nik)) return res.status(400).json({ error: 'NIK wajib 16 digit angka!' });
 
     // Validasi tanggal lahir → umur minimal 17
     if (tanggalLahir) {
@@ -360,7 +369,7 @@ app.put('/api/pemilih/:id', verifyToken, async (req, res) => {
   try {
     const { nama, nik, kaderId, tanggalLahir, jenisKelamin } = req.body;
     if (!nama || !nik || !kaderId) return res.status(400).json({ error: 'Semua field wajib diisi' });
-    if (nik.length !== 16 || isNaN(nik)) return res.status(400).json({ error: 'NIK harus 16 digit angka' });
+    if (!/^\d{16}$/.test(nik)) return res.status(400).json({ error: 'NIK wajib 16 digit angka!' });
 
     const nikDup = await query(`
       SELECT p.nama, CONCAT('Kader ', k.nomor, ' — ', k.nama) AS namaKader
@@ -472,7 +481,7 @@ app.post('/api/pemilih/import', verifyToken, upload.single('file'), async (req, 
 
 // ══════ API LOG DUPLIKAT ═══════════════════════════════
 
-app.get('/api/log-duplikat', verifyToken, async (req, res) => {
+app.get('/api/log-duplikat', verifyToken, isSuperadmin, async (req, res) => {
   try {
     const { page, limit, kaderId } = req.query;
     const pg  = Math.max(1, parseInt(page) || 1);
@@ -497,7 +506,15 @@ app.get('/api/log-duplikat', verifyToken, async (req, res) => {
              l.nama_existing,
              ${hasJumlahPercobaan ? 'l.jumlah_percobaan' : '1 AS jumlah_percobaan'},
              ${hasWaktuPertama ? 'l.waktu_pertama' : 'l.created_at'} AS waktu_pertama,
-             ${hasWaktuTerakhir ? 'l.waktu_terakhir' : 'l.created_at'} AS waktu_terakhir
+             ${hasWaktuTerakhir ? 'l.waktu_terakhir' : 'l.created_at'} AS waktu_terakhir,
+             CASE
+               WHEN kp.id IS NOT NULL THEN CONCAT('Kader ', kp.nomor, ' — ', kp.nama)
+               WHEN l.kader_id_pelaku IS NOT NULL THEN CONCAT('ID: ', l.kader_id_pelaku)
+               ELSE '-' END AS kaderPelaku,
+             CASE
+               WHEN ke.id IS NOT NULL THEN CONCAT('Kader ', ke.nomor, ' — ', ke.nama)
+               WHEN l.kader_id_existing IS NOT NULL THEN CONCAT('ID: ', l.kader_id_existing)
+               ELSE '-' END AS kaderExisting
       FROM log_duplikat l
       LEFT JOIN kader kp ON kp.id = l.kader_id_pelaku
       LEFT JOIN kader ke ON ke.id = l.kader_id_existing
@@ -515,7 +532,7 @@ app.get('/api/log-duplikat', verifyToken, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get('/api/log-duplikat/statistik', verifyToken, async (req, res) => {
+app.get('/api/log-duplikat/statistik', verifyToken, isSuperadmin, async (req, res) => {
   try {
     const hasJumlahPercobaan = await hasColumn('log_duplikat', 'jumlah_percobaan');
 
@@ -559,9 +576,32 @@ app.get('/import',         (req, res) => res.sendFile(path.join(__dirname, 'publ
 app.get('/log-duplikat',   (req, res) => res.sendFile(path.join(__dirname, 'public', 'log-duplikat.html')));
 app.get('/kelola-user',    (req, res) => res.sendFile(path.join(__dirname, 'public', 'kelola-user.html')));
 
+// ── Ensure role enum includes AdminKantor (for backward-compatibility) ──
+async function ensureRoleEnum() {
+  try {
+    const [row] = await query(
+      `SELECT COLUMN_TYPE FROM information_schema.columns
+       WHERE table_schema = ? AND table_name = 'users' AND column_name = 'role'`,
+      [process.env.DB_NAME || 'pendataan_pemilih']
+    );
+    if (!row || !row.COLUMN_TYPE) return;
+
+    // If AdminKantor is missing, alter enum to include it
+    if (!row.COLUMN_TYPE.includes('AdminKantor')) {
+      console.log('🔧 Menambahkan role AdminKantor ke enum users.role');
+      await query(
+        "ALTER TABLE users MODIFY COLUMN role ENUM('Superadmin','AdminKantor','Kader') NOT NULL DEFAULT 'Kader'"
+      );
+    }
+  } catch (err) {
+    console.warn('⚠️ Gagal memastikan role enum:', err.message);
+  }
+}
+
 // ── Start ─────────────────────────────────────────────
 async function start() {
   await testConnection();
+  await ensureRoleEnum();
   app.listen(PORT, () => console.log(`✅ Server berjalan di http://localhost:${PORT}`));
 }
 start();

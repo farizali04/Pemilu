@@ -35,8 +35,17 @@ function isSuperadmin(req, res, next) {
   next();
 }
 
+// ── isAdminKantor: Hanya Admin Kantor atau Superadmin ──
+function isAdminKantor(req, res, next) {
+  if (!req.user || (req.user.role !== 'AdminKantor' && req.user.role !== 'Superadmin')) {
+    return res.status(403).json({ error: 'Akses ditolak. Hanya Admin Kantor atau Superadmin.' });
+  }
+  next();
+}
+
 // ── Generate token ──
 function generateToken(user) {
+  // user.id_kader might be null for Superadmin / AdminKantor
   return jwt.sign(
     { id: user.id, username: user.username, role: user.role, idKader: user.id_kader },
     JWT_SECRET,

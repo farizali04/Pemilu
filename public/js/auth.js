@@ -87,9 +87,20 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // Kosmetik RBAC: Sembunyikan elemen Superadmin jika role Kader
+  // Kosmetik RBAC: Sembunyikan elemen Superadmin / Admin Kantor sesuai role
   if (userRole === 'Kader') {
-    const adminElems = document.querySelectorAll('.superadmin-only');
-    adminElems.forEach(el => el.style.display = 'none');
+    document.querySelectorAll('.superadmin-only, .admin-only').forEach(el => el.style.display = 'none');
+  } else if (userRole === 'AdminKantor') {
+    // Admin Kantor tidak perlu lihat log duplikat / fitur superadmin
+    document.querySelectorAll('.superadmin-only').forEach(el => el.style.display = 'none');
   }
+
+  // Pastikan bila user klik back setelah logout, mereka langsung diarahkan login lagi
+  window.addEventListener('pageshow', (event) => {
+    const navType = performance.getEntriesByType('navigation')[0];
+    const isBack = event.persisted || (navType && navType.type === 'back_forward');
+    if (isBack && !token && !isLoginPage) {
+      window.location.replace('/login');
+    }
+  });
 });
