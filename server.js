@@ -1,18 +1,29 @@
 // ════════════════════════════════════════
-//  server.js — Express + MySQL (v2)
+//  server.js — Express + MySQL (v3 — Auth)
 // ════════════════════════════════════════
 require('dotenv').config();
-const express = require('express');
-const path    = require('path');
-const multer  = require('multer');
-const XLSX    = require('xlsx');
+const express  = require('express');
+const path     = require('path');
+const multer   = require('multer');
+const XLSX     = require('xlsx');
+const bcrypt   = require('bcryptjs');
 const { query, testConnection } = require('./db');
+const { verifyToken, isSuperadmin, generateToken } = require('./middleware/auth');
 
 const app    = express();
 const PORT   = process.env.PORT || 3000;
-const upload = multer({ dest: 'uploads/', limits: { fileSize: 10 * 1024 * 1024 } }); // max 10MB
+const upload = multer({ dest: 'uploads/', limits: { fileSize: 10 * 1024 * 1024 } });
 
 app.use(express.json());
+
+// Prevent browser caching for protected pages (helps logout + back button behavior)
+app.use((req, res, next) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
+  next();
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 function genId() {
@@ -54,9 +65,104 @@ function parseNIK(nik) {
   return { tanggalLahir: tgl, jenisKelamin };
 }
 
+async function hasColumn(table, column) {
+  const res = await query(
+    `SELECT COUNT(*) AS n
+     FROM information_schema.columns
+     WHERE table_schema = ? AND table_name = ? AND column_name = ?`,
+    [process.env.DB_NAME || '', table, column]
+  );
+  return res[0] && res[0].n > 0;
+}
+
+// ══════ API AUTH ══════════════════════════════════════
+
+// Login
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    if (!username || !password) return res.status(400).json({ error: 'Username dan password wajib diisi' });
+
+    const users = await query(`
+      SELECT u.*, CONCAT('Kader ', k.nomor, ' \u2014 ', k.nama) AS namaKader
+      FROM users u LEFT JOIN kader k ON k.id = u.id_kader
+      WHERE u.username = ?
+    `, [username]);
+
+    if (!users.length) return res.status(401).json({ error: 'Username tidak ditemukan' });
+    const user = users[0];
+
+    const valid = await bcrypt.compare(password, user.password_hash);
+    if (!valid) return res.status(401).json({ error: 'Password salah' });
+
+    const token = generateToken(user);
+    res.json({
+      token,
+      user: {
+        id: user.id, username: user.username, role: user.role,
+        idKader: user.id_kader, namaKader: user.namaKader
+      }
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Info user saat ini
+app.get('/api/auth/me', verifyToken, async (req, res) => {
+  try {
+    const users = await query(`
+      SELECT u.id, u.username, u.role, u.id_kader,
+             CONCAT('Kader ', k.nomor, ' \u2014 ', k.nama) AS namaKader
+      FROM users u LEFT JOIN kader k ON k.id = u.id_kader WHERE u.id = ?
+    `, [req.user.id]);
+    if (!users.length) return res.status(404).json({ error: 'User tidak ditemukan' });
+    res.json(users[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Register (Superadmin only)
+app.post('/api/auth/register', verifyToken, isSuperadmin, async (req, res) => {
+  try {
+    const { username, password, role, idKader } = req.body;
+    if (!username || !password) return res.status(400).json({ error: 'Username dan password wajib diisi' });
+    if (!['Superadmin', 'Kader'].includes(role)) return res.status(400).json({ error: 'Role harus Superadmin atau Kader' });
+    if (role === 'Kader' && !idKader) return res.status(400).json({ error: 'Kader harus dipilih untuk role Kader' });
+    if (password.length < 6) return res.status(400).json({ error: 'Password minimal 6 karakter' });
+
+    const exists = await query('SELECT id FROM users WHERE username = ?', [username]);
+    if (exists.length) return res.status(409).json({ error: 'Username sudah dipakai' });
+
+    const id   = genId();
+    const hash = await bcrypt.hash(password, 12);
+    await query('INSERT INTO users (id, username, password_hash, role, id_kader) VALUES (?, ?, ?, ?, ?)',
+      [id, username, hash, role, role === 'Kader' ? idKader : null]);
+    res.status(201).json({ id, username, role });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// List users (Superadmin only)
+app.get('/api/auth/users', verifyToken, isSuperadmin, async (req, res) => {
+  try {
+    const data = await query(`
+      SELECT u.id, u.username, u.role, u.id_kader, u.created_at,
+             CONCAT('Kader ', k.nomor, ' \u2014 ', k.nama) AS namaKader
+      FROM users u LEFT JOIN kader k ON k.id = u.id_kader ORDER BY u.created_at DESC
+    `);
+    res.json(data);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Delete user (Superadmin only)
+app.delete('/api/auth/users/:id', verifyToken, isSuperadmin, async (req, res) => {
+  try {
+    if (req.user.id === req.params.id) return res.status(400).json({ error: 'Tidak bisa menghapus diri sendiri' });
+    await query('DELETE FROM users WHERE id = ?', [req.params.id]);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ══════ API KADER ══════════════════════════════════════
 
-app.get('/api/kader', async (req, res) => {
+app.get('/api/kader', verifyToken, async (req, res) => {
   try {
     const rows = await query(`
       SELECT k.*, COUNT(p.id) AS jumlahPemilih
@@ -67,7 +173,7 @@ app.get('/api/kader', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get('/api/kader/:id', async (req, res) => {
+app.get('/api/kader/:id', verifyToken, async (req, res) => {
   try {
     const rows = await query('SELECT * FROM kader WHERE id = ?', [req.params.id]);
     if (!rows.length) return res.status(404).json({ error: 'Kader tidak ditemukan' });
@@ -75,7 +181,7 @@ app.get('/api/kader/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/kader', async (req, res) => {
+app.post('/api/kader', verifyToken, isSuperadmin, async (req, res) => {
   try {
     const { nama, nomor, targetSuara } = req.body;
     if (!nama || !nomor) return res.status(400).json({ error: 'Nama dan nomor wajib diisi' });
@@ -89,7 +195,7 @@ app.post('/api/kader', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.put('/api/kader/:id', async (req, res) => {
+app.put('/api/kader/:id', verifyToken, isSuperadmin, async (req, res) => {
   try {
     const { nama, nomor, targetSuara } = req.body;
     const dup = await query('SELECT id FROM kader WHERE nomor = ? AND id != ?', [parseInt(nomor), req.params.id]);
@@ -101,7 +207,7 @@ app.put('/api/kader/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.delete('/api/kader/:id', async (req, res) => {
+app.delete('/api/kader/:id', verifyToken, isSuperadmin, async (req, res) => {
   try {
     const punya = await query('SELECT id FROM pemilih WHERE kader_id = ? LIMIT 1', [req.params.id]);
     if (punya.length) return res.status(400).json({ error: 'Kader masih memiliki data pemilih' });
@@ -112,7 +218,7 @@ app.delete('/api/kader/:id', async (req, res) => {
 
 // ══════ API PEMILIH ════════════════════════════════════
 
-app.get('/api/pemilih', async (req, res) => {
+app.get('/api/pemilih', verifyToken, async (req, res) => {
   try {
     const { q, kaderId, page, limit } = req.query;
     const pg  = Math.max(1, parseInt(page) || 1);
@@ -151,17 +257,25 @@ app.get('/api/pemilih', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get('/api/pemilih/statistik', async (req, res) => {
+app.get('/api/pemilih/statistik', verifyToken, async (req, res) => {
   try {
-    const [total]   = await query('SELECT COUNT(*) AS n FROM pemilih');
-    const [logDup]  = await query('SELECT COALESCE(SUM(jumlah_percobaan), 0) AS n FROM log_duplikat');
+    const [total] = await query('SELECT COUNT(*) AS n FROM pemilih');
+
+    // Be tolerant terhadap beberapa versi skema log_duplikat (dengan/ tanpa jumlah_percobaan)
     const [logRows] = await query('SELECT COUNT(*) AS n FROM log_duplikat');
-    res.json({ total: total.n, percobaanDuplikat: logDup.n, entryDuplikat: logRows.n });
+    let percobaanDuplikat = logRows.n;
+
+    if (await hasColumn('log_duplikat', 'jumlah_percobaan')) {
+      const [logDup] = await query('SELECT COALESCE(SUM(jumlah_percobaan), 0) AS n FROM log_duplikat');
+      percobaanDuplikat = logDup.n;
+    }
+
+    res.json({ total: total.n, percobaanDuplikat, entryDuplikat: logRows.n });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // Cek NIK real-time (ringan, hanya cek ada/tidak)
-app.get('/api/pemilih/cek-nik/:nik', async (req, res) => {
+app.get('/api/pemilih/cek-nik/:nik', verifyToken, async (req, res) => {
   try {
     const rows = await query(`
       SELECT p.nama, p.nik, CONCAT('Kader ', k.nomor, ' — ', k.nama) AS namaKader
@@ -171,7 +285,7 @@ app.get('/api/pemilih/cek-nik/:nik', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get('/api/pemilih/:id', async (req, res) => {
+app.get('/api/pemilih/:id', verifyToken, async (req, res) => {
   try {
     const rows = await query(`
       SELECT p.*, CONCAT('Kader ', k.nomor, ' — ', k.nama) AS namaKader,
@@ -183,11 +297,11 @@ app.get('/api/pemilih/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/pemilih', async (req, res) => {
+app.post('/api/pemilih', verifyToken, async (req, res) => {
   try {
     const { nama, nik, kaderId, tanggalLahir, jenisKelamin } = req.body;
     if (!nama || !nik || !kaderId) return res.status(400).json({ error: 'Nama, NIK, dan Kader wajib diisi' });
-    if (nik.length !== 16 || isNaN(nik)) return res.status(400).json({ error: 'NIK harus 16 digit angka' });
+    if (!/^\d{16}$/.test(nik)) return res.status(400).json({ error: 'NIK wajib 16 digit angka!' });
 
     // Validasi tanggal lahir → umur minimal 17
     if (tanggalLahir) {
@@ -205,16 +319,26 @@ app.post('/api/pemilih', async (req, res) => {
     `, [nik]);
 
     if (nikDup.length) {
-      // UPSERT: increment counter jika sudah ada, insert jika belum
-      await query(
-        `INSERT INTO log_duplikat (nik_target, nama_input, kader_id_pelaku, kader_id_existing, nama_existing)
-         VALUES (?, ?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE
-           jumlah_percobaan = jumlah_percobaan + 1,
-           waktu_terakhir = CURRENT_TIMESTAMP,
-           nama_input = VALUES(nama_input)`,
-        [nik, nama.trim(), kaderId, nikDup[0].kader_id, nikDup[0].nama]
-      );
+      const hasJumlahPercobaan = await hasColumn('log_duplikat', 'jumlah_percobaan');
+
+      if (hasJumlahPercobaan) {
+        // UPSERT: increment counter jika sudah ada, insert jika belum
+        await query(
+          `INSERT INTO log_duplikat (nik_target, nama_input, kader_id_pelaku, kader_id_existing, nama_existing)
+           VALUES (?, ?, ?, ?, ?)
+           ON DUPLICATE KEY UPDATE
+             jumlah_percobaan = jumlah_percobaan + 1,
+             waktu_terakhir = CURRENT_TIMESTAMP,
+             nama_input = VALUES(nama_input)`,
+          [nik, nama.trim(), kaderId, nikDup[0].kader_id, nikDup[0].nama]
+        );
+      } else {
+        // Tabel lama tanpa jumlah_percobaan; simpan log duplikat sebagai baris baru
+        await query(
+          'INSERT INTO log_duplikat (nik_target, nama_input, kader_id_pelaku, kader_id_existing, nama_existing) VALUES (?, ?, ?, ?, ?)',
+          [nik, nama.trim(), kaderId, nikDup[0].kader_id, nikDup[0].nama]
+        );
+      }
 
       return res.status(409).json({
         error: `DITOLAK: NIK ${nik} sudah terdaftar pada ${nikDup[0].namaKader} atas nama "${nikDup[0].nama}".`,
@@ -241,11 +365,11 @@ app.post('/api/pemilih', async (req, res) => {
   }
 });
 
-app.put('/api/pemilih/:id', async (req, res) => {
+app.put('/api/pemilih/:id', verifyToken, async (req, res) => {
   try {
     const { nama, nik, kaderId, tanggalLahir, jenisKelamin } = req.body;
     if (!nama || !nik || !kaderId) return res.status(400).json({ error: 'Semua field wajib diisi' });
-    if (nik.length !== 16 || isNaN(nik)) return res.status(400).json({ error: 'NIK harus 16 digit angka' });
+    if (!/^\d{16}$/.test(nik)) return res.status(400).json({ error: 'NIK wajib 16 digit angka!' });
 
     const nikDup = await query(`
       SELECT p.nama, CONCAT('Kader ', k.nomor, ' — ', k.nama) AS namaKader
@@ -266,7 +390,7 @@ app.put('/api/pemilih/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.delete('/api/pemilih/:id', async (req, res) => {
+app.delete('/api/pemilih/:id', verifyToken, isSuperadmin, async (req, res) => {
   try {
     await query('DELETE FROM pemilih WHERE id = ?', [req.params.id]);
     res.json({ success: true });
@@ -275,7 +399,7 @@ app.delete('/api/pemilih/:id', async (req, res) => {
 
 // ══════ IMPORT EXCEL ═══════════════════════════════════
 
-app.post('/api/pemilih/import', upload.single('file'), async (req, res) => {
+app.post('/api/pemilih/import', verifyToken, upload.single('file'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'File tidak ditemukan' });
     const kaderId = req.body.kaderId;
@@ -314,16 +438,24 @@ app.post('/api/pemilih/import', upload.single('file'), async (req, res) => {
       // Cek duplikat
       const nikDup = await query('SELECT nama, kader_id FROM pemilih WHERE nik = ?', [nik]);
       if (nikDup.length) {
-        // UPSERT: increment counter jika sudah ada
-        await query(
-          `INSERT INTO log_duplikat (nik_target, nama_input, kader_id_pelaku, kader_id_existing, nama_existing)
-           VALUES (?, ?, ?, ?, ?)
-           ON DUPLICATE KEY UPDATE
-             jumlah_percobaan = jumlah_percobaan + 1,
-             waktu_terakhir = CURRENT_TIMESTAMP,
-             nama_input = VALUES(nama_input)`,
-          [nik, nama, kaderId, nikDup[0].kader_id, nikDup[0].nama]
-        );
+        const hasJumlahPercobaan = await hasColumn('log_duplikat', 'jumlah_percobaan');
+        if (hasJumlahPercobaan) {
+          // UPSERT: increment counter jika sudah ada
+          await query(
+            `INSERT INTO log_duplikat (nik_target, nama_input, kader_id_pelaku, kader_id_existing, nama_existing)
+             VALUES (?, ?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE
+               jumlah_percobaan = jumlah_percobaan + 1,
+               waktu_terakhir = CURRENT_TIMESTAMP,
+               nama_input = VALUES(nama_input)`,
+            [nik, nama, kaderId, nikDup[0].kader_id, nikDup[0].nama]
+          );
+        } else {
+          await query(
+            'INSERT INTO log_duplikat (nik_target, nama_input, kader_id_pelaku, kader_id_existing, nama_existing) VALUES (?, ?, ?, ?, ?)',
+            [nik, nama, kaderId, nikDup[0].kader_id, nikDup[0].nama]
+          );
+        }
         hasil.gagal++;
         hasil.detail.push({ baris: i + 2, nama, nik, status: 'duplikat', alasan: `NIK sudah terdaftar atas nama "${nikDup[0].nama}"` });
         continue;
@@ -349,7 +481,7 @@ app.post('/api/pemilih/import', upload.single('file'), async (req, res) => {
 
 // ══════ API LOG DUPLIKAT ═══════════════════════════════
 
-app.get('/api/log-duplikat', async (req, res) => {
+app.get('/api/log-duplikat', verifyToken, isSuperadmin, async (req, res) => {
   try {
     const { page, limit, kaderId } = req.query;
     const pg  = Math.max(1, parseInt(page) || 1);
@@ -364,16 +496,30 @@ app.get('/api/log-duplikat', async (req, res) => {
       `SELECT COUNT(*) AS total FROM log_duplikat l${where}`, params
     );
 
+    const hasJumlahPercobaan = await hasColumn('log_duplikat', 'jumlah_percobaan');
+    const hasWaktuTerakhir   = await hasColumn('log_duplikat', 'waktu_terakhir');
+
+    const hasWaktuPertama   = await hasColumn('log_duplikat', 'waktu_pertama');
+
     const data = await query(`
       SELECT l.nik_target, l.nama_input, l.kader_id_pelaku, l.kader_id_existing,
-             l.nama_existing, l.jumlah_percobaan, l.waktu_pertama, l.waktu_terakhir,
-             CONCAT('Kader ', kp.nomor, ' — ', kp.nama) AS kaderPelaku,
-             CONCAT('Kader ', ke.nomor, ' — ', ke.nama) AS kaderExisting
+             l.nama_existing,
+             ${hasJumlahPercobaan ? 'l.jumlah_percobaan' : '1 AS jumlah_percobaan'},
+             ${hasWaktuPertama ? 'l.waktu_pertama' : 'l.created_at'} AS waktu_pertama,
+             ${hasWaktuTerakhir ? 'l.waktu_terakhir' : 'l.created_at'} AS waktu_terakhir,
+             CASE
+               WHEN kp.id IS NOT NULL THEN CONCAT('Kader ', kp.nomor, ' — ', kp.nama)
+               WHEN l.kader_id_pelaku IS NOT NULL THEN CONCAT('ID: ', l.kader_id_pelaku)
+               ELSE '-' END AS kaderPelaku,
+             CASE
+               WHEN ke.id IS NOT NULL THEN CONCAT('Kader ', ke.nomor, ' — ', ke.nama)
+               WHEN l.kader_id_existing IS NOT NULL THEN CONCAT('ID: ', l.kader_id_existing)
+               ELSE '-' END AS kaderExisting
       FROM log_duplikat l
       LEFT JOIN kader kp ON kp.id = l.kader_id_pelaku
       LEFT JOIN kader ke ON ke.id = l.kader_id_existing
       ${where}
-      ORDER BY l.waktu_terakhir DESC
+      ORDER BY ${hasWaktuTerakhir ? 'l.waktu_terakhir' : 'l.created_at'} DESC
       LIMIT ? OFFSET ?
     `, [...params, lim, offset]);
 
@@ -386,22 +532,40 @@ app.get('/api/log-duplikat', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get('/api/log-duplikat/statistik', async (req, res) => {
+app.get('/api/log-duplikat/statistik', verifyToken, isSuperadmin, async (req, res) => {
   try {
-    const [totalPercobaan] = await query('SELECT COALESCE(SUM(jumlah_percobaan), 0) AS n FROM log_duplikat');
-    const [totalNIK]       = await query('SELECT COUNT(*) AS n FROM log_duplikat');
-    const perKader = await query(`
-      SELECT CONCAT('Kader ', k.nomor, ' — ', k.nama) AS kader,
-             COUNT(DISTINCT l.nik_target) AS nikDirebut,
-             SUM(l.jumlah_percobaan) AS totalSpam
-      FROM log_duplikat l JOIN kader k ON k.id = l.kader_id_pelaku
-      GROUP BY l.kader_id_pelaku ORDER BY totalSpam DESC
-    `);
-    res.json({ totalPercobaan: totalPercobaan.n, totalNIK: totalNIK.n, perKader });
+    const hasJumlahPercobaan = await hasColumn('log_duplikat', 'jumlah_percobaan');
+
+    const [totalNIK] = await query('SELECT COUNT(*) AS n FROM log_duplikat');
+    let totalPercobaan = totalNIK.n;
+
+    let perKader;
+    if (hasJumlahPercobaan) {
+      const [row] = await query('SELECT COALESCE(SUM(jumlah_percobaan), 0) AS n FROM log_duplikat');
+      totalPercobaan = row.n;
+      perKader = await query(`
+        SELECT CONCAT('Kader ', k.nomor, ' — ', k.nama) AS kader,
+               COUNT(DISTINCT l.nik_target) AS nikDirebut,
+               SUM(l.jumlah_percobaan) AS totalSpam
+        FROM log_duplikat l JOIN kader k ON k.id = l.kader_id_pelaku
+        GROUP BY l.kader_id_pelaku ORDER BY totalSpam DESC
+      `);
+    } else {
+      perKader = await query(`
+        SELECT CONCAT('Kader ', k.nomor, ' — ', k.nama) AS kader,
+               COUNT(DISTINCT l.nik_target) AS nikDirebut,
+               COUNT(*) AS totalSpam
+        FROM log_duplikat l JOIN kader k ON k.id = l.kader_id_pelaku
+        GROUP BY l.kader_id_pelaku ORDER BY totalSpam DESC
+      `);
+    }
+
+    res.json({ totalPercobaan, totalNIK: totalNIK.n, perKader });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ── HTML pages ────────────────────────────────────────
+app.get('/login',          (req, res) => res.sendFile(path.join(__dirname, 'public', 'login.html')));
 app.get('/',               (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 app.get('/tambah-pemilih', (req, res) => res.sendFile(path.join(__dirname, 'public', 'tambah-pemilih.html')));
 app.get('/tambah-kader',   (req, res) => res.sendFile(path.join(__dirname, 'public', 'tambah-kader.html')));
@@ -410,10 +574,34 @@ app.get('/edit-pemilih',   (req, res) => res.sendFile(path.join(__dirname, 'publ
 app.get('/edit-kader',     (req, res) => res.sendFile(path.join(__dirname, 'public', 'edit-kader.html')));
 app.get('/import',         (req, res) => res.sendFile(path.join(__dirname, 'public', 'import.html')));
 app.get('/log-duplikat',   (req, res) => res.sendFile(path.join(__dirname, 'public', 'log-duplikat.html')));
+app.get('/kelola-user',    (req, res) => res.sendFile(path.join(__dirname, 'public', 'kelola-user.html')));
+
+// ── Ensure role enum includes AdminKantor (for backward-compatibility) ──
+async function ensureRoleEnum() {
+  try {
+    const [row] = await query(
+      `SELECT COLUMN_TYPE FROM information_schema.columns
+       WHERE table_schema = ? AND table_name = 'users' AND column_name = 'role'`,
+      [process.env.DB_NAME || 'pendataan_pemilih']
+    );
+    if (!row || !row.COLUMN_TYPE) return;
+
+    // If AdminKantor is missing, alter enum to include it
+    if (!row.COLUMN_TYPE.includes('AdminKantor')) {
+      console.log('🔧 Menambahkan role AdminKantor ke enum users.role');
+      await query(
+        "ALTER TABLE users MODIFY COLUMN role ENUM('Superadmin','AdminKantor','Kader') NOT NULL DEFAULT 'Kader'"
+      );
+    }
+  } catch (err) {
+    console.warn('⚠️ Gagal memastikan role enum:', err.message);
+  }
+}
 
 // ── Start ─────────────────────────────────────────────
 async function start() {
   await testConnection();
+  await ensureRoleEnum();
   app.listen(PORT, () => console.log(`✅ Server berjalan di http://localhost:${PORT}`));
 }
 start();

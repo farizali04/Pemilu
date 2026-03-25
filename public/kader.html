@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Kelola Kader — Pendataan</title>
   <link rel="stylesheet" href="/css/style.css"/>
+  <script src="/js/auth.js"></script>
 </head>
 <body>
 
@@ -31,7 +32,7 @@
       <h1>Kelola Kader</h1>
       <p>Tambah dan kelola data kader yang bertugas mendata pemilih.</p>
     </div>
-    <a href="/tambah-kader" class="btn btn-green" style="width:auto;margin-bottom:2px;">➕ Tambah Kader</a>
+    <a href="/tambah-kader" class="btn btn-green superadmin-only" style="width:auto;margin-bottom:2px;">➕ Tambah Kader</a>
   </div>
 
   <div class="card">
@@ -104,7 +105,7 @@
         </td>
         <td style="font-size:12px;color:var(--text3);">${formatDate(k.created_at)}</td>
         <td>
-          <div class="gap-12">
+          <div class="gap-12 superadmin-only">
             <a href="/edit-kader?id=${k.id}" class="btn btn-outline btn-xs">✏️ Edit</a>
             <button class="btn btn-danger btn-xs" onclick="konfirmasiHapusKader('${k.id}','${k.nama}',${k.nomor})">🗑️ Hapus</button>
           </div>

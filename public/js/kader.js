@@ -5,17 +5,17 @@
 const KaderAPI = {
 
   async getAll() {
-    const res = await fetch('/api/kader');
+    const res = await fetchWithAuth('/api/kader');
     return res.json();
   },
 
   async getById(id) {
-    const res = await fetch(`/api/kader/${id}`);
+    const res = await fetchWithAuth(`/api/kader/${id}`);
     return res.json();
   },
 
   async tambah(data) {
-    const res = await fetch('/api/kader', {
+    const res = await fetchWithAuth('/api/kader', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
@@ -24,7 +24,7 @@ const KaderAPI = {
   },
 
   async edit(id, data) {
-    const res = await fetch(`/api/kader/${id}`, {
+    const res = await fetchWithAuth(`/api/kader/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
@@ -33,7 +33,7 @@ const KaderAPI = {
   },
 
   async hapus(id) {
-    const res = await fetch(`/api/kader/${id}`, { method: 'DELETE' });
+    const res = await fetchWithAuth(`/api/kader/${id}`, { method: 'DELETE' });
     return res.json();
   }
 };

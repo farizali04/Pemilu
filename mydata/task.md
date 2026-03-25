@@ -1,38 +1,23 @@
-# Pemilu Application Overhaul — Task Checklist
+# Authentication & RBAC — Task Checklist
 
-## Fase 1: Rombak Database ✅
-- [x] Ubah kolom `umur` (TINYINT) → `tanggal_lahir` (DATE) di tabel `pemilih`
-- [x] Tambahkan kolom `jenis_kelamin` ENUM('L','P') di tabel `pemilih`
-- [x] Tambahkan kolom `target_suara` (INT) di tabel `kader`
-- [x] Buat tabel `log_duplikat` untuk audit kecurangan
-- [x] Buat migration SQL script
+## Fase 1: Database
+- [x] Create `users` table (id, username, password_hash, role, id_kader)
+- [x] Create migration script + run
 
-## Fase 2: Backend — Perbaiki Logika Inti ✅
-- [x] Ubah endpoint POST `/api/pemilih` — NIK duplikat DITOLAK KERAS
-- [x] Tambahkan auto-log ke `log_duplikat` saat NIK duplikat terdeteksi
-- [x] Ubah semua endpoint untuk mendukung `tanggal_lahir` & `jenis_kelamin`
-- [x] Hitung umur on-the-fly dari `tanggal_lahir` saat response
-- [x] Tambahkan endpoint import massal Excel (POST `/api/pemilih/import`)
-- [x] Tambahkan endpoint GET `/api/log-duplikat` untuk dasbor audit
-- [x] Perbaiki server-side pagination di GET `/api/pemilih`
+## Fase 2: Backend Auth
+- [x] Install bcryptjs + jsonwebtoken
+- [x] Create [middleware/auth.js](file:///d:/MAINSERVER/laragon/www/Pemilu/middleware/auth.js) (verifyToken, isSuperadmin)
+- [x] Add POST `/api/auth/login` endpoint
+- [x] Add POST `/api/auth/register` endpoint (Superadmin only)
+- [x] Add GET `/api/auth/me` endpoint (current user info)
+- [x] Seed default Superadmin account
+- [x] Protect all API routes with verifyToken
+- [x] Protect admin-only routes with isSuperadmin
 
-## Fase 3: Frontend — Form & Auto-fill ✅
-- [x] Auto-parse NIK: extract tanggal lahir & jenis kelamin dari digit ke-7-12
-- [x] Ganti field `umur` → `tanggal_lahir` & `jenis_kelamin` (auto-filled)
-- [x] Form BLOKIR penyimpanan jika NIK duplikat
-- [x] Hapus tombol "Tandai sebagai AMAN" dan logika duplikat flag
-
-## Fase 4: Frontend — Dashboard & Efisiensi ✅
-- [x] Tambahkan progress bar target suara per kader di dashboard
-- [x] Tambahkan halaman import Excel dengan drag & drop
-- [x] Tambahkan halaman/section log duplikat (audit kecurangan)
-- [x] Perbaiki tampilan tabel untuk menampilkan tanggal lahir bukan umur
-
-## Fase 5: Verifikasi ✅
-- [x] Test server restart & basic pages load
-- [x] Test NIK duplikat cross-kader → DITOLAK ✅
-- [x] Test umur dihitung otomatis dari tanggal_lahir ✅
-- [x] Test server-side pagination ✅
-- [x] Test log duplikat tercatat ✅
-- [x] Test statistik endpoint ✅
-- [x] Fix: `pool.execute` → `pool.query` untuk LIMIT/OFFSET params
+## Fase 3: Frontend
+- [x] Create [login.html](file:///d:/MAINSERVER/laragon/www/Pemilu/public/login.html) page
+- [x] Add token to all fetch() headers ([auth.js](file:///d:/MAINSERVER/laragon/www/Pemilu/public/js/auth.js) helper + modified [pemilih.js](file:///d:/MAINSERVER/laragon/www/Pemilu/public/js/pemilih.js)/[kader.js](file:///d:/MAINSERVER/laragon/www/Pemilu/public/js/kader.js))
+- [x] Add auth guard — redirect to login if no token ([auth.js](file:///d:/MAINSERVER/laragon/www/Pemilu/public/js/auth.js))
+- [x] UI manipulation: hide admin-only buttons for Kader role (`.superadmin-only`)
+- [x] Add logout button to header
+- [x] Show current user info in header
